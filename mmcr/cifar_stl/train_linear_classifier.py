@@ -75,18 +75,19 @@ def train_classifier(
 ):
     top_acc = 0.0
     train_data, _, test_data = get_datasets(
-        dataset, 1, "./datasets", batch_transform=False, supervised=True
+        dataset, 1, batch_transform=False, supervised=True
     )
 
     train_loader = DataLoader(
-        train_data, batch_size=batch_size, shuffle=True, num_workers=13, pin_memory=True
+        train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True
     )
     test_loader = DataLoader(
-        test_data, batch_size=batch_size, shuffle=False, num_workers=13, pin_memory=True
+        test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True
     )
 
     # load pretrained weights
     pretrained_model = Model(dataset=dataset)
+    pretrained_model = torch.compile(pretrained_model)
     sd = torch.load(model_path, map_location="cpu")
     pretrained_model.load_state_dict(sd)
     dataset_num_classes = {"cifar10": 10, "stl10": 10, "cifar100": 100}
@@ -127,7 +128,7 @@ class Net(nn.Module):
     def __init__(self, f, num_classes):
         super().__init__()
         self.f = f
-        self.fc = nn.Linear(2048, num_classes)
+        self.fc = nn.Linear(512, num_classes)
 
     def forward(self, x):
         f = self.f(x)

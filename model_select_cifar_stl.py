@@ -2,7 +2,7 @@ import sys
 
 sys.path.append("..")
 
-import submitit
+# import submitit
 from mmcr.cifar_stl.model_select import select_model
 from argparse import ArgumentParser
 
@@ -19,18 +19,18 @@ parser.add_argument(
 args = parser.parse_args()
 
 # submitit stuff
-slurm_folder = "./slurm/classifier/%j"
-executor = submitit.AutoExecutor(folder=slurm_folder)
-executor.update_parameters(mem_gb=128, timeout_min=10000)
-executor.update_parameters(slurm_array_parallelism=1024)
-executor.update_parameters(gpus_per_node=1)
-executor.update_parameters(cpus_per_task=13)
-executor.update_parameters(slurm_partition="gpu")
-executor.update_parameters(constraint="a100-80gb")
-executor.update_parameters(name="model_select")
+# slurm_folder = "./slurm/classifier/%j"
+# executor = submitit.AutoExecutor(folder=slurm_folder)
+# executor.update_parameters(mem_gb=128, timeout_min=10000)
+# executor.update_parameters(slurm_array_parallelism=1024)
+# executor.update_parameters(gpus_per_node=1)
+# executor.update_parameters(cpus_per_task=13)
+# executor.update_parameters(slurm_partition="gpu")
+# executor.update_parameters(constraint="a100-80gb")
+# executor.update_parameters(name="model_select")
 
-job = executor.submit(
-    select_model,
+# job = executor.submit(
+select_model(
     checkpoint_directory=args.checkpoint_dir,
     dataset=args.dataset,
     batch_size=args.batch_size,

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models.resnet import resnet50
+from torchvision.models.resnet import resnet18, resnet50
 from torch import Tensor
 from typing import Tuple
 
@@ -11,7 +11,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
 
         self.f = []
-        for name, module in resnet50().named_children():
+        for name, module in resnet18().named_children():
             if name == "conv1":
                 module = nn.Conv2d(
                     3, 64, kernel_size=3, stride=1, padding=1, bias=False
@@ -28,7 +28,7 @@ class Model(nn.Module):
         self.f = nn.Sequential(*self.f)
 
         # projection head (Following exactly barlow twins offical repo)
-        projector_dims = [2048] + projector_dims
+        projector_dims = [512] + projector_dims
         layers = []
         for i in range(len(projector_dims) - 2):
             layers.append(
@@ -43,5 +43,4 @@ class Model(nn.Module):
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
         out = self.g(feature)
-
         return feature, out

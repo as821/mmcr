@@ -17,6 +17,8 @@ class MMCR_Loss(nn.Module):
         self.first_time = True
 
     def forward(self, z: Tensor) -> Tuple[Tensor, dict]:
+        # print(f"{z.max()} {z.min()}")
+        
         z = F.normalize(z, dim=-1)
         z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
 
@@ -36,6 +38,10 @@ class MMCR_Loss(nn.Module):
             z_local = z_local_
 
         centroids = torch.mean(z_local, dim=-1)
+
+        # print(f"{z.max()} {z.min()} {centroids.max()} {centroids.min()}")
+        # print(f"{torch.linalg.cond(centroids)}")
+
         if self.lmbda != 0.0:
             local_nuc = torch.linalg.svdvals(z_local).sum()
         else:

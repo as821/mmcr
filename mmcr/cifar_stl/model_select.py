@@ -1,6 +1,7 @@
 import os
 from mmcr.cifar_stl.train_linear_classifier import train_classifier
 import torch
+from tqdm import tqdm
 
 
 def select_model(
@@ -28,7 +29,7 @@ def select_model(
 
     print("Number of checkpoints to test: ", len(checkpoints_to_test))
     best_acc = 0.0
-    for checkpoint in checkpoints_to_test:
+    for checkpoint in tqdm(checkpoints_to_test):
         model, acc = train_classifier(
             checkpoint_directory + checkpoint,
             dataset=dataset,
@@ -49,4 +50,5 @@ def select_model(
         to_save = {"model": best_model.state_dict(), "acc": best_acc}
         torch.save(to_save, save_dir + "best_model.pth")
 
+    print(f"\n\nBEST ACC: {best_acc}")
     return best_acc
