@@ -14,6 +14,7 @@ def train(
     n_aug: int,
     batch_size: int,
     lr: float,
+    final_lr: float,
     epochs: int,
     lmbda: float,
     save_folder: str,
@@ -49,6 +50,7 @@ def train(
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-6)
     loss_function = MMCR_Loss(lmbda=lmbda, n_aug=n_aug, distributed=False)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs * len(train_loader), eta_min=final_lr)
 
     if enable_wandb:
         wandb.watch(model, log_freq=10)
@@ -72,6 +74,7 @@ def train(
             # backward pass
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
             # update the training bar
             total_num += data_tuple[0].size(0)
@@ -95,6 +98,7 @@ def train(
                 vis_dict["train_loss"] = total_loss / total_num
                 vis_dict["val_acc_1"] = acc_1
                 vis_dict["val_acc_5"] = acc_5
+                vis_dict["lr"] = scheduler.get_last_lr()[0]
                 wandb.log(vis_dict, step=epoch)
 
 

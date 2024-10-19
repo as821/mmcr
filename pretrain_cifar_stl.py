@@ -8,6 +8,7 @@ parser.add_argument("--dataset", type=str, default="cifar10")
 parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--n_aug", type=int, default=40)
 parser.add_argument("--lr", type=float, default=1e-3)
+parser.add_argument("--final_lr", type=float, default=1e-4)
 parser.add_argument("--lmbda", type=float, default=0.0)
 parser.add_argument("--epochs", type=int, default=250)
 parser.add_argument("--num_workers", type=int, default=16)
@@ -41,6 +42,7 @@ train(
     n_aug=args.n_aug,
     batch_size=args.batch_size,
     lr=args.lr,
+    final_lr=args.final_lr,
     epochs=args.epochs,
     lmbda=args.lmbda,
     save_folder=args.save_folder,
