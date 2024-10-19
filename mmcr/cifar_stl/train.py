@@ -19,7 +19,8 @@ def train(
     lmbda: float,
     save_folder: str,
     save_freq: int,
-    enable_wandb: bool
+    enable_wandb: bool, 
+    weight_decay: float
 ):
 
     if enable_wandb:
@@ -48,7 +49,7 @@ def train(
         test_dataset, batch_size=128, shuffle=False, num_workers=12
     )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-6)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_function = MMCR_Loss(lmbda=lmbda, n_aug=n_aug, distributed=False)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs * len(train_loader), eta_min=final_lr)
 

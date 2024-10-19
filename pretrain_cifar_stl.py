@@ -9,6 +9,7 @@ parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--n_aug", type=int, default=40)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--final_lr", type=float, default=1e-4)
+parser.add_argument("--weight_decay", type=float, default=1e-6)
 parser.add_argument("--lmbda", type=float, default=0.0)
 parser.add_argument("--epochs", type=int, default=250)
 parser.add_argument("--num_workers", type=int, default=16)
@@ -48,4 +49,5 @@ train(
     save_folder=args.save_folder,
     save_freq=args.save_freq,
     enable_wandb=args.wandb,
+    weight_decay=args.weight_decay
 )
