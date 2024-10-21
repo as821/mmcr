@@ -46,7 +46,8 @@ class MMCR_Loss(nn.Module):
             local_nuc = torch.linalg.svdvals(z_local).sum()
         else:
             local_nuc = torch.tensor(0.0)
-        global_nuc = torch.linalg.svdvals(centroids).sum()
+        global_sing_vals = torch.linalg.svdvals(centroids)
+        global_nuc = global_sing_vals.sum()
 
         batch_size = z_local.shape[0]
         loss = self.lmbda * local_nuc / batch_size - global_nuc
@@ -55,6 +56,7 @@ class MMCR_Loss(nn.Module):
             "loss": loss.item(),
             "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
+            "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
         }
 
         self.first_time = False

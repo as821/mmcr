@@ -105,6 +105,13 @@ def train(
             if enable_wandb:
                 # check manifold subspace alignment 
                 vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data)
+                
+                # stats on singular values from last gradient step
+                sing_vals = loss_dict["global_sing_vals"]
+                vis_dict["sing_val_min"] = sing_vals.min()
+                vis_dict["sing_val_max"] = sing_vals.max()
+                vis_dict["sing_val_mean"] = sing_vals.mean()
+                vis_dict["sing_vals"] = wandb.Histogram(sing_vals)
 
                 vis_dict["train_loss"] = total_loss / total_num
                 vis_dict["val_acc_1"] = acc_1

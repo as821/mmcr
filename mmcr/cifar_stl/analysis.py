@@ -53,8 +53,6 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
 
         aug_centroid_sim = aug_centroid_sim.numpy().flatten()
 
-        print(f"{aug_centroid_sim.min()} {aug_centroid_sim.max()} {aug_centroid_sim.mean()}")
-
         plt.figure(figsize=(10, 6))
         plt.hist(aug_centroid_sim, bins=50, edgecolor='black')
         plt.title('Augmentation-Centroid Cosine Similarities')
