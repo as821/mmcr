@@ -7,42 +7,29 @@ import wandb
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.loss_mmcr import MMCR_Loss
+from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment
 
 
-def train(
-    dataset: str,
-    n_aug: int,
-    batch_size: int,
-    lr: float,
-    final_lr: float,
-    epochs: int,
-    lmbda: float,
-    save_folder: str,
-    save_freq: int,
-    enable_wandb: bool, 
-    weight_decay: float
-):
-
-    if enable_wandb:
+def train(args):
+    if args.wandb:
         wandb.init(config={
-            "dataset":dataset,
-            "n_aug": n_aug,
-            "batch_size": batch_size,
-            "lr": lr,
-            "epochs": epochs,
-            "lmbda": lmbda,
+            "dataset":args.dataset,
+            "n_aug": args.n_aug,
+            "batch_size": args.batch_size,
+            "lr": args.lr,
+            "epochs": args.epochs,
+            "lmbda": args.lmbda,
         }, project="mmcr")
 
     torch.set_float32_matmul_precision('high')
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
-        dataset=dataset, n_aug=n_aug
+        dataset=args.dataset, n_aug=args.n_aug
     )
-    model = Model(projector_dims=[512, 128], dataset=dataset)
+    model = Model(projector_dims=[512, 128], dataset=args.dataset)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=16
@@ -56,17 +43,17 @@ def train(
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=500, shuffle=False, num_workers=12)
     stats_data = next(iter(stats_loader))
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_function = MMCR_Loss(lmbda=lmbda, n_aug=n_aug, distributed=False)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs * len(train_loader), eta_min=final_lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
-    if enable_wandb:
+    if args.wandb:
         wandb.watch(model, log_freq=10)
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
     top_acc = 0.0
-    for epoch in range(epochs):
+    for epoch in range(args.epochs):
         model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
         for step, data_tuple in enumerate(train_bar):
@@ -89,7 +76,7 @@ def train(
             total_loss += loss.item() * data_tuple[0].size(0)
             train_bar.set_description(
                 "Train Epoch: [{}/{}] Loss: {:.4f}".format(
-                    epoch, epochs, total_loss / total_num
+                    epoch, args.epochs, total_loss / total_num
                 )
             )
 
@@ -102,7 +89,7 @@ def train(
             if acc_1 > top_acc:
                 top_acc = acc_1
 
-            if enable_wandb:
+            if args.wandb:
                 # check manifold subspace alignment 
                 vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data)
                 
@@ -120,11 +107,11 @@ def train(
                 wandb.log(vis_dict, step=epoch)
 
 
-            if epoch % save_freq == 0 or acc_1 == top_acc:
+            if epoch % args.save_freq == 0 or acc_1 == top_acc:
                 torch.save(
                     model.state_dict(),
-                    f"{save_folder}/{dataset}_{n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
+                    f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
                 )
 
-    if enable_wandb:
+    if args.wandb:
         wandb.finish()

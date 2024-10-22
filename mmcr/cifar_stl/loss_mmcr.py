@@ -8,13 +8,40 @@ from typing import Tuple
 import sys
 
 
+class BatchFIFOQueue():
+    def __init__(self, n_batches, batch_sz, feature_dim=128):
+        # Implement FIFO queue as a circular buffer
+        self.buf = torch.zeros((n_batches * batch_sz, feature_dim), device="cuda")     # assumes constant batch size
+        self.batch_sz = batch_sz
+        self.n_batches = n_batches
+        self.ptr = 0
+        self.sz = 0         # queue is "warm" once this == n_batches
+
+    def enqueue(self, batch):
+        assert batch.shape[0] == self.batch_sz
+        start = self.ptr * self.batch_sz
+        end = (self.ptr + 1) * self.batch_sz
+        # print(f"{self.buf.shape} {batch.shape} {self.buf[start : end, :].shape} {start} {end}")
+        self.buf[start : end, :] = batch
+        self.ptr = (self.ptr + 1) % self.n_batches
+        if self.sz < self.n_batches:
+            self.sz += 1
+            if self.sz == self.n_batches:
+                print(f"Batch queue is warm after {self.sz} batches.")
+
+    def is_warm(self):
+        return self.sz == self.n_batches
+
+
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
         self.distributed = distributed
         self.first_time = True
+
+        self.memory_bank = memory_bank
 
     def forward(self, z: Tensor) -> Tuple[Tensor, dict]:
         # print(f"{z.max()} {z.min()}")
@@ -41,6 +68,12 @@ class MMCR_Loss(nn.Module):
 
         # print(f"{z.max()} {z.min()} {centroids.max()} {centroids.min()}")
         # print(f"{torch.linalg.cond(centroids)}")
+
+        if self.memory_bank is not None:
+            curr_centroids = centroids.detach()
+            if self.memory_bank.is_warm():
+                centroids = torch.cat([self.memory_bank.buf.detach(), centroids])
+            self.memory_bank.enqueue(curr_centroids)
 
         if self.lmbda != 0.0:
             local_nuc = torch.linalg.svdvals(z_local).sum()
