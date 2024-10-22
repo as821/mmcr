@@ -8,7 +8,7 @@ parser.add_argument("--dataset", type=str, default="cifar10")
 parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--n_aug", type=int, default=40)
 parser.add_argument("--lr", type=float, default=1e-3)
-parser.add_argument("--final_lr", type=float, default=1e-4)
+parser.add_argument("--final_lr", type=float, default=1e-3)
 parser.add_argument("--weight_decay", type=float, default=1e-6)
 parser.add_argument("--lmbda", type=float, default=0.0)
 parser.add_argument("--epochs", type=int, default=250)
@@ -17,6 +17,8 @@ parser.add_argument("--save_freq", type=int, default=5)
 parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--mem_bank", type=int, default=0)
 parser.add_argument("--save_folder", type=str, default="./training_checkpoints/cifar_stl")
+parser.add_argument("--stronger_aug", action="store_true")
+
 args = parser.parse_args()
 
 # submitit job management
@@ -36,3 +38,4 @@ args = parser.parse_args()
 # )
 
 train(args)
+
