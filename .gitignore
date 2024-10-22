@@ -10,3 +10,4 @@ training_checkpoints
 .ipynb_checkpoints
 notebooks/*
 notebooks
+wandb

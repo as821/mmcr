@@ -14,7 +14,7 @@ import random
 from PIL import Image, ImageOps, ImageFilter
 
 
-def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwargs):
+def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, **kwargs):
     data_dir = "./datasets/"
     if dataset == "stl10":
         train_split = "train" if supervised else "train+unlabeled"
@@ -50,6 +50,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwarg
                 train_transform=True,
                 batch_transform=batch_transform,
                 n_transform=n_aug,
+                strong_aug=strong_aug,
                 **kwargs,
             ),
             download=True,
@@ -61,6 +62,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwarg
                 train_transform=False,
                 batch_transform=False,
                 n_transform=n_aug,
+                strong_aug=strong_aug,
                 **kwargs,
             ),
             download=True,
@@ -72,6 +74,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwarg
                 train_transform=False,
                 batch_transform=False,
                 n_transform=n_aug,
+                strong_aug=strong_aug,
                 **kwargs,
             ),
             download=True,
@@ -84,6 +87,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwarg
                 train_transform=True,
                 batch_transform=batch_transform,
                 n_transform=n_aug,
+                strong_aug=strong_aug,
                 **kwargs,
             ),
             download=True,
@@ -95,6 +99,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwarg
                 train_transform=False,
                 batch_transform=False,
                 n_transform=n_aug,
+                strong_aug=strong_aug,
                 **kwargs,
             ),
             download=True,
@@ -106,6 +111,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, **kwarg
                 train_transform=False,
                 batch_transform=False,
                 n_transform=n_aug,
+                strong_aug=strong_aug,
                 **kwargs,
             ),
             download=True,
@@ -164,27 +170,66 @@ class StlBatchTransform:
             return self.transform(x)
 
 
+class GaussianBlur(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, img):
+        if random.random() < self.p:
+            sigma = random.random() * 1.9 + 0.1
+            return img.filter(ImageFilter.GaussianBlur(sigma))
+        else:
+            return img
+
+class Solarization(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, img):
+        if random.random() < self.p:
+            return ImageOps.solarize(img)
+        else:
+            return img
+
+
 class CifarBatchTransform:
     def __init__(
         self,
         n_transform,
         train_transform=True,
         batch_transform=True,
+        strong_aug=False,
         **kwargs,
     ):
-        if train_transform is True:
-            lst_of_transform = [
-                transforms.RandomResizedCrop(32),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomApply(
-                    [transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8
-                ),
-                transforms.RandomGrayscale(p=0.2),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                ),
-            ]
+        if train_transform:
+            if strong_aug:
+                lst_of_transform = [
+                    transforms.RandomResizedCrop(32),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomApply(
+                        [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
+                    ),
+                    transforms.RandomGrayscale(p=0.2),
+                    GaussianBlur(0.5),
+                    Solarization(0.2),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+                    ),
+                ]
+            else:
+                lst_of_transform = [
+                    transforms.RandomResizedCrop(32),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomApply(
+                        [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
+                    ),
+                    transforms.RandomGrayscale(p=0.2),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+                    ),
+                ]
 
             self.transform = transforms.Compose(lst_of_transform)
         else:

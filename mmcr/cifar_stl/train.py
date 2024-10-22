@@ -22,7 +22,8 @@ def train(
     save_folder: str,
     save_freq: int,
     enable_wandb: bool, 
-    weight_decay: float
+    weight_decay: float,
+    strong_aug: bool
 ):
 
     if enable_wandb:
@@ -38,7 +39,7 @@ def train(
     torch.set_float32_matmul_precision('high')
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
-        dataset=dataset, n_aug=n_aug
+        dataset=dataset, n_aug=n_aug, strong_aug=strong_aug
     )
     model = Model(projector_dims=[512, 128], dataset=dataset)
     train_loader = torch.utils.data.DataLoader(
