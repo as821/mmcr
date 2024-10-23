@@ -14,7 +14,7 @@ import random
 from PIL import Image, ImageOps, ImageFilter
 
 
-def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, **kwargs):
+def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, **kwargs):
     data_dir = "./datasets/"
     if dataset == "stl10":
         train_split = "train" if supervised else "train+unlabeled"
@@ -51,6 +51,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=batch_transform,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                weak_aug=weak_aug,
+                diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
             download=True,
@@ -63,6 +65,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                weak_aug=weak_aug,
+                diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
             download=True,
@@ -75,6 +79,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                weak_aug=weak_aug,
+                diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
             download=True,
@@ -88,6 +94,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=batch_transform,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                weak_aug=weak_aug,
+                diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
             download=True,
@@ -100,6 +108,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                weak_aug=weak_aug,
+                diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
             download=True,
@@ -112,6 +122,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                weak_aug=weak_aug,
+                diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
             download=True,
@@ -199,6 +211,8 @@ class CifarBatchTransform:
         train_transform=True,
         batch_transform=True,
         strong_aug=False,
+        diffusion_aug=False,
+        weak_aug=False,
         **kwargs,
     ):
         if train_transform:
@@ -212,6 +226,24 @@ class CifarBatchTransform:
                     transforms.RandomGrayscale(p=0.2),
                     GaussianBlur(0.5),
                     Solarization(0.2),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+                    ),
+                ]
+            elif weak_aug:
+                lst_of_transform = [
+                    transforms.RandomResizedCrop(32, scale=(0.3, 1)),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+                    ),
+                ]                
+            elif diffusion_aug:
+                lst_of_transform = [
+                    transforms.RandomResizedCrop(32),
+                    transforms.RandomHorizontalFlip(p=0.5),
                     transforms.ToTensor(),
                     transforms.Normalize(
                         [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]

@@ -20,13 +20,15 @@ def train(args):
             "lr": args.lr,
             "epochs": args.epochs,
             "lmbda": args.lmbda,
-            "strong_aug":args.stronger_aug
+            "strong_aug":args.stronger_aug,
+            "diffusion_aug":args.diffusion_aug,
+            "weak_aug":args.weak_aug,
         }, project="mmcr")
 
     torch.set_float32_matmul_precision('high')
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
-        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug
+        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug
     )
     model = Model(projector_dims=[512, 128], dataset=args.dataset)
     train_loader = torch.utils.data.DataLoader(
@@ -45,7 +47,7 @@ def train(args):
     stats_data = next(iter(stats_loader))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size))
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
     if args.wandb:
