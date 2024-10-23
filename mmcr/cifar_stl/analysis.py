@@ -66,18 +66,15 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
 
 
 def visualize_augmentations(vis_dict, tensor):
-
-
-
-    import pdb
-    pdb.set_trace()
-
     N, B, C, H, W = tensor.shape
     
     # Create a figure with N rows and B columns
-    fig, axes = plt.subplots(N, B, figsize=figsize)
+    fig, axes = plt.subplots(N, B, figsize=(20, 20))
 
-    # TODO(as) denormalize images
+    # denormalize images
+    mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(1, 1, 3, 1, 1)
+    std = torch.tensor([0.2023, 0.1994, 0.2010]).view(1, 1, 3, 1, 1)
+    tensor = tensor * std + mean
 
     # Normalize to [0, 1] if not already
     if tensor.min() < 0 or tensor.max() > 1:
@@ -92,7 +89,7 @@ def visualize_augmentations(vis_dict, tensor):
     
     
     plt.tight_layout()
-    vis_dict["augmentations"] = wand.Image(plt)
+    vis_dict["augmentations"] = wandb.Image(plt)
     plt.close()
     return vis_dict
 

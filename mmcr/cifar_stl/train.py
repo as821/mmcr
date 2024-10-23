@@ -8,7 +8,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations
 
 
 def train(args):
@@ -62,14 +62,10 @@ def train(args):
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
 
-            # visualize augmentations
-            vis_dict = visualize_augmentations(vis_dict, img_batch)
-
             # forward pass
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 img_batch, labels = data_tuple
-                img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W")
-                features, out = model(img_batch.cuda(non_blocking=True))
+                features, out = model(einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True))
             loss, loss_dict = loss_function(out.float())
 
             # backward pass
@@ -85,6 +81,9 @@ def train(args):
                     epoch, args.epochs, total_loss / total_num
                 )
             )
+            
+            # visualize augmentations
+            # vis_dict = visualize_augmentations(vis_dict, img_batch.detach())
 
         if epoch % 1 == 0:
             acc_1, acc_5 = test_one_epoch(
@@ -98,6 +97,9 @@ def train(args):
             if args.wandb:
                 # check manifold subspace alignment 
                 vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data)
+
+                # visualize augmentations
+                vis_dict = visualize_augmentations(vis_dict, img_batch.detach())
                 
                 # stats on singular values from last gradient step
                 sing_vals = loss_dict["global_sing_vals"]
