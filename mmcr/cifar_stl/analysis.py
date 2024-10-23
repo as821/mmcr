@@ -65,5 +65,34 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
     return vis_dict
 
 
+def visualize_augmentations(vis_dict, tensor):
 
+
+
+    import pdb
+    pdb.set_trace()
+
+    N, B, C, H, W = tensor.shape
+    
+    # Create a figure with N rows and B columns
+    fig, axes = plt.subplots(N, B, figsize=figsize)
+
+    # TODO(as) denormalize images
+
+    # Normalize to [0, 1] if not already
+    if tensor.min() < 0 or tensor.max() > 1:
+        tensor = (tensor - tensor.min()) / (tensor.max() - tensor.min())
+    
+    for n in range(N):
+        for b in range(B):
+            img = tensor[n, b]
+            img = img.permute(1, 2, 0)  # RGB image
+            axes[n, b].imshow(img)
+            axes[n, b].axis('off')
+    
+    
+    plt.tight_layout()
+    vis_dict["augmentations"] = wand.Image(plt)
+    plt.close()
+    return vis_dict
 

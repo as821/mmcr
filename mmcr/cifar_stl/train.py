@@ -62,6 +62,9 @@ def train(args):
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
 
+            # visualize augmentations
+            vis_dict = visualize_augmentations(vis_dict, img_batch)
+
             # forward pass
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 img_batch, labels = data_tuple
