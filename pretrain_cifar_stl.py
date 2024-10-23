@@ -20,6 +20,7 @@ parser.add_argument("--save_folder", type=str, default="./training_checkpoints/c
 parser.add_argument("--stronger_aug", action="store_true")
 parser.add_argument("--weak_aug", action="store_true")
 parser.add_argument("--diffusion_aug", action="store_true")
+parser.add_argument("--l2_spectral_norm", action="store_true")
 
 args = parser.parse_args()
 

@@ -34,12 +34,13 @@ class BatchFIFOQueue():
 
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
         self.distributed = distributed
         self.first_time = True
+        self.l2_spectral_norm = l2_spectral_norm
 
         self.memory_bank = memory_bank
 
@@ -80,7 +81,11 @@ class MMCR_Loss(nn.Module):
         else:
             local_nuc = torch.tensor(0.0)
         global_sing_vals = torch.linalg.svdvals(centroids)
-        global_nuc = global_sing_vals.sum()
+        
+        if self.l2_spectral_norm:
+            global_nuc = torch.linalg.vector_norm(global_sing_vals)
+        else:
+            global_nuc = global_sing_vals.sum()
 
         batch_size = z_local.shape[0]
         loss = self.lmbda * local_nuc / batch_size - global_nuc
