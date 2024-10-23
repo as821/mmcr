@@ -18,6 +18,7 @@ parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--mem_bank", type=int, default=0)
 parser.add_argument("--save_folder", type=str, default="./training_checkpoints/cifar_stl")
 parser.add_argument("--stronger_aug", action="store_true")
+parser.add_argument("--l2_spectral_norm", action="store_true")
 
 args = parser.parse_args()
 
