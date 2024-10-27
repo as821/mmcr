@@ -21,18 +21,22 @@ def train(args):
             "epochs": args.epochs,
             "lmbda": args.lmbda,
             "strong_aug":args.stronger_aug,
+            "strongest_aug":args.strongest_aug,
             "diffusion_aug":args.diffusion_aug,
             "weak_aug":args.weak_aug,
+            "diffusion_alpha":args.diff_alpha,
+            "spectral_target":args.spectral_target,
+            "spectral_topk":args.spectral_topk
         }, project="mmcr")
 
     torch.set_float32_matmul_precision('high')
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
-        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug
+        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
     )
     model = Model(projector_dims=[512, 128], dataset=args.dataset)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True, prefetch_factor=4
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=16
@@ -47,11 +51,15 @@ def train(args):
     stats_data = next(iter(stats_loader))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
     if args.wandb:
         wandb.watch(model, log_freq=10)
+
+    if args.diffusion_aug:
+        cifar_mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(-1, 1, 1).cuda()
+        cifar_std = torch.tensor([0.2023, 0.1994, 0.2010]).view(-1, 1, 1).cuda()
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
@@ -65,7 +73,15 @@ def train(args):
             # forward pass
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 img_batch, labels = data_tuple
-                features, out = model(einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True))
+                img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
+                if args.diffusion_aug:
+                    rnd = (torch.randn_like(img_batch) * cifar_std) + cifar_mean
+                    # print(f"{img_batch.min()} {img_batch.max()} {rnd.min()} {rnd.max()}")
+                    # img_batch = (1 - args.diff_alpha) * img_batch + args.diff_alpha * rnd
+                    img_batch += args.diff_alpha * rnd
+                    # print(f"\t{img_batch.min()} {img_batch.max()}")
+
+                features, out = model(img_batch)
             loss, loss_dict = loss_function(out.float())
 
             # backward pass
@@ -81,9 +97,6 @@ def train(args):
                     epoch, args.epochs, total_loss / total_num
                 )
             )
-            
-            # visualize augmentations
-            # vis_dict = visualize_augmentations(vis_dict, img_batch.detach())
 
         if epoch % 1 == 0:
             acc_1, acc_5 = test_one_epoch(
@@ -99,7 +112,8 @@ def train(args):
                 vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data)
 
                 # visualize augmentations
-                vis_dict = visualize_augmentations(vis_dict, img_batch.detach())
+                img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                vis_dict = visualize_augmentations(vis_dict, img_batch)
                 
                 # stats on singular values from last gradient step
                 sing_vals = loss_dict["global_sing_vals"]

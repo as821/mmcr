@@ -14,7 +14,7 @@ import random
 from PIL import Image, ImageOps, ImageFilter
 
 
-def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, **kwargs):
+def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, **kwargs):
     data_dir = "./datasets/"
     if dataset == "stl10":
         train_split = "train" if supervised else "train+unlabeled"
@@ -51,6 +51,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=batch_transform,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
                 **kwargs,
@@ -65,6 +66,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
                 **kwargs,
@@ -79,6 +81,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
                 **kwargs,
@@ -94,6 +97,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=batch_transform,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
                 **kwargs,
@@ -108,6 +112,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
                 **kwargs,
@@ -122,6 +127,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
+                strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
                 **kwargs,
@@ -213,6 +219,7 @@ class CifarBatchTransform:
         strong_aug=False,
         diffusion_aug=False,
         weak_aug=False,
+        strongest_aug=False,
         **kwargs,
     ):
         if train_transform:
@@ -226,6 +233,21 @@ class CifarBatchTransform:
                     transforms.RandomGrayscale(p=0.2),
                     GaussianBlur(0.5),
                     Solarization(0.2),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+                    ),
+                ]
+            elif strongest_aug:
+                lst_of_transform = [
+                    transforms.RandomResizedCrop(32),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomApply(
+                        [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
+                    ),
+                    transforms.RandomGrayscale(p=0.2),
+                    GaussianBlur(0.75),
+                    Solarization(0.5),
                     transforms.ToTensor(),
                     transforms.Normalize(
                         [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
@@ -275,6 +297,7 @@ class CifarBatchTransform:
             )
         self.n_transform = n_transform
         self.batch_transform = batch_transform
+        self.diffusion_aug = diffusion_aug
 
     def __call__(self, x):
         if self.batch_transform:

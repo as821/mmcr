@@ -34,13 +34,15 @@ class BatchFIFOQueue():
 
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
         self.distributed = distributed
         self.first_time = True
         self.l2_spectral_norm = l2_spectral_norm
+        self.spectral_target = spectral_target
+        self.spectral_topk = spectral_topk
 
         self.memory_bank = memory_bank
 
@@ -84,6 +86,13 @@ class MMCR_Loss(nn.Module):
         
         if self.l2_spectral_norm:
             global_nuc = torch.linalg.vector_norm(global_sing_vals)
+        elif self.spectral_target:
+            # we want to minimize distance between singular values and 1, but further down this term is mult by -1. Counteract that here
+            global_nuc = (global_sing_vals - 1).sum()
+        elif self.spectral_topk:
+            # maximize the value of the num. class largest values, minimize the rest
+            sorted_values, _ = torch.sort(global_sing_vals, descending=True)
+            global_nuc = sorted_values[:10].sum() - sorted_values[10:].sum()
         else:
             global_nuc = global_sing_vals.sum()
 
