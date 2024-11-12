@@ -36,7 +36,11 @@ class Model(nn.Module):
             )
             layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
             layers.append(nn.ReLU())
-        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
+        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1] * 2, bias=False))
+        
+        # import pdb
+        # pdb.set_trace()
+
         self.g = nn.Sequential(*layers)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:

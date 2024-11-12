@@ -48,7 +48,17 @@ class MMCR_Loss(nn.Module):
 
     def forward(self, z: Tensor) -> Tuple[Tensor, dict]:
         # print(f"{z.max()} {z.min()}")
+
+        # Treat z as stacked mean and log variance (for stability)
+        assert z.shape[-1] % 2 == 0
+        splt = int(z.shape[-1] / 2)
+        mu, log_var = z[..., :splt], z[..., splt:]
+
+        # Sample from distribution using reparameterization trick
+        std = torch.exp(0.5 * log_var)
+        z = mu + (torch.randn_like(mu) * std)
         
+        # Project samples onto unit sphere + proceed with MMCR loss
         z = F.normalize(z, dim=-1)
         z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
 
@@ -104,6 +114,8 @@ class MMCR_Loss(nn.Module):
             "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
             "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
+            "mu" : mu.detach().cpu().numpy(),
+            "log_var" : log_var.detach().cpu().numpy()
         }
 
         self.first_time = False

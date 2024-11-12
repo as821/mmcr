@@ -115,12 +115,26 @@ def train(args):
                 img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                 vis_dict = visualize_augmentations(vis_dict, img_batch)
                 
+                def log_range(key_name, prefix, vis_dict, loss_dict):
+                    foo = loss_dict[key_name]
+                    vis_dict[prefix + "_min"] = foo.min()
+                    vis_dict[prefix + "_max"] = foo.max()
+                    vis_dict[prefix + "_mean"] = foo.mean()
+                    vis_dict[prefix] = wandb.Histogram(foo)
+                    return vis_dict
+
                 # stats on singular values from last gradient step
-                sing_vals = loss_dict["global_sing_vals"]
-                vis_dict["sing_val_min"] = sing_vals.min()
-                vis_dict["sing_val_max"] = sing_vals.max()
-                vis_dict["sing_val_mean"] = sing_vals.mean()
-                vis_dict["sing_vals"] = wandb.Histogram(sing_vals)
+                # sing_vals = loss_dict["global_sing_vals"]
+                # vis_dict["sing_val_min"] = sing_vals.min()
+                # vis_dict["sing_val_max"] = sing_vals.max()
+                # vis_dict["sing_val_mean"] = sing_vals.mean()
+                # vis_dict["sing_vals"] = wandb.Histogram(sing_vals)
+                vis_dict = log_range("global_sing_vals", "sing_vals", vis_dict, loss_dict)
+
+                # stats on mean/log variance from last gradient step
+                vis_dict = log_range("mu", "mu", vis_dict, loss_dict)
+                vis_dict = log_range("log_var", "log_var", vis_dict, loss_dict)
+
 
                 vis_dict["train_loss"] = total_loss / total_num
                 vis_dict["val_acc_1"] = acc_1
