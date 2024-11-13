@@ -7,17 +7,22 @@ import matplotlib.pyplot as plt
 
 
 
-def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
+def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
+    prefix = "feat_" if use_feat else "out_"
     model.eval()
     with torch.no_grad():        
         # 100 samples from the augmentation manfiolds of 500 images in the CIFAR-10
         data, target = data_tuple
-        features = torch.zeros((data.shape[0], data.shape[1], 512), dtype=data.dtype, device="cuda")
-        centroids = torch.zeros((data.shape[0], 512), dtype=data.dtype, device="cuda")
+
+        sz = 512 if use_feat else 128
+        features = torch.zeros((data.shape[0], data.shape[1], sz), dtype=data.dtype, device="cuda")
+        centroids = torch.zeros((data.shape[0], sz), dtype=data.dtype, device="cuda")
         aug_centroid_sim = torch.zeros((data.shape[0], data.shape[1]), device="cpu")
         for idx in range(data.shape[0]):
             feat, out = model(data[idx].cuda(non_blocking=True))
-            feat = F.normalize(feat, dim=-1)
+            if not use_feat:
+                feat = out
+                feat = F.normalize(feat, dim=-1)
 
             # calculate the centroid of this image manifold
             centroid = feat.mean(dim=0)
@@ -36,8 +41,8 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
         plt.title('Intra-Class Cosine Similarities')
         plt.xlabel('Cosine Similarity')
         plt.ylabel('Frequency')
-        vis_dict["intra_class_centroid"] = same_class_sims.mean()
-        vis_dict["intra_class_centroid_dist"] = wandb.Image(plt)
+        vis_dict[prefix + "intra_class_centroid"] = same_class_sims.mean()
+        vis_dict[prefix + "intra_class_centroid_dist"] = wandb.Image(plt)
         plt.close()
 
         other_class_sims = centroid_sim[~same_class_mask].numpy().flatten()
@@ -46,8 +51,8 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
         plt.title('Inter-Class Cosine Similarities')
         plt.xlabel('Cosine Similarity')
         plt.ylabel('Frequency')
-        vis_dict["inter_class_centroid"] = other_class_sims.mean()
-        vis_dict["inter_class_centroid_dist"] = wandb.Image(plt)
+        vis_dict[prefix + "inter_class_centroid"] = other_class_sims.mean()
+        vis_dict[prefix + "inter_class_centroid_dist"] = wandb.Image(plt)
         plt.close()
 
 
@@ -58,8 +63,8 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple):
         plt.title('Augmentation-Centroid Cosine Similarities')
         plt.xlabel('Cosine Similarity')
         plt.ylabel('Frequency')
-        vis_dict["aug_centroid_sim"] = aug_centroid_sim.mean()
-        vis_dict["aug_centroid_sim_dist"] = wandb.Image(plt)
+        vis_dict[prefix + "aug_centroid_sim"] = aug_centroid_sim.mean()
+        vis_dict[prefix + "aug_centroid_sim_dist"] = wandb.Image(plt)
         plt.close()
 
     return vis_dict

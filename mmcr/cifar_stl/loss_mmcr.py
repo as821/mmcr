@@ -104,6 +104,8 @@ class MMCR_Loss(nn.Module):
             "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
             "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
+            "centroid_norms" : torch.linalg.vector_norm(centroids.detach(), dim=-1).detach().cpu().numpy(),
+            "median_sing_vals" : torch.linalg.svdvals(torch.median(z_local.detach(), dim=-1).values).detach().cpu().numpy(),
         }
 
         self.first_time = False
