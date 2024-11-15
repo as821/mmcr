@@ -29,6 +29,14 @@ def train(args):
             "spectral_topk":args.spectral_topk
         }, project="mmcr")
 
+    def vis_dist(key_name, prefix, vis_dict, loss_dict):
+        foo = loss_dict[key_name]
+        vis_dict[prefix + "_min"] = foo.min()
+        vis_dict[prefix + "_max"] = foo.max()
+        vis_dict[prefix + "_mean"] = foo.mean()
+        vis_dict[prefix] = wandb.Histogram(foo)
+        return vis_dict
+
     torch.set_float32_matmul_precision('high')
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
@@ -36,7 +44,7 @@ def train(args):
     )
     model = Model(projector_dims=[512, 128], dataset=args.dataset)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True, prefetch_factor=4
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=16
@@ -65,7 +73,7 @@ def train(args):
     model = torch.compile(model, mode="max-autotune")
     top_acc = 0.0
     for epoch in range(args.epochs):
-        model.train()
+        # model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
@@ -94,60 +102,46 @@ def train(args):
             total_loss += loss.item() * data_tuple[0].size(0)
             train_bar.set_description(
                 "Train Epoch: [{}/{}] Loss: {:.4f}".format(
-                    epoch, args.epochs, total_loss / total_num
+                    epoch, args.epochs, loss.item()
                 )
             )
 
         if epoch % 1 == 0:
-            acc_1, acc_5 = test_one_epoch(
-                model,
-                memory_loader,
-                test_loader,
-            )
-            if acc_1 > top_acc:
-                top_acc = acc_1
-
-            if args.wandb:
-                # check manifold subspace alignment 
-                vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data)
-
-                # visualize augmentations
-                img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
-                vis_dict = visualize_augmentations(vis_dict, img_batch)
-                
-                def log_range(key_name, prefix, vis_dict, loss_dict):
-                    foo = loss_dict[key_name]
-                    vis_dict[prefix + "_min"] = foo.min()
-                    vis_dict[prefix + "_max"] = foo.max()
-                    vis_dict[prefix + "_mean"] = foo.mean()
-                    vis_dict[prefix] = wandb.Histogram(foo)
-                    return vis_dict
-
-                # stats on singular values from last gradient step
-                # sing_vals = loss_dict["global_sing_vals"]
-                # vis_dict["sing_val_min"] = sing_vals.min()
-                # vis_dict["sing_val_max"] = sing_vals.max()
-                # vis_dict["sing_val_mean"] = sing_vals.mean()
-                # vis_dict["sing_vals"] = wandb.Histogram(sing_vals)
-                vis_dict = log_range("global_sing_vals", "sing_vals", vis_dict, loss_dict)
-
-                # stats on mean/log variance from last gradient step
-                vis_dict = log_range("mu", "mu", vis_dict, loss_dict)
-                vis_dict = log_range("log_var", "log_var", vis_dict, loss_dict)
-
-
-                vis_dict["train_loss"] = total_loss / total_num
-                vis_dict["val_acc_1"] = acc_1
-                vis_dict["val_acc_5"] = acc_5
-                vis_dict["lr"] = scheduler.get_last_lr()[0]
-                wandb.log(vis_dict, step=epoch)
-
-
-            if epoch % args.save_freq == 0 or acc_1 == top_acc:
-                torch.save(
-                    model.state_dict(),
-                    f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
+            with torch.no_grad():
+                acc_1, acc_5 = test_one_epoch(
+                    model,
+                    memory_loader,
+                    test_loader,
                 )
+                if acc_1 > top_acc:
+                    top_acc = acc_1
+
+                if args.wandb:
+                    # check manifold subspace alignment 
+                    vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
+                    vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
+
+                    # visualize augmentations
+                    img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                    vis_dict = visualize_augmentations(vis_dict, img_batch)
+                    
+                    # stats on singular values from last gradient step
+                    vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
+                    _, feat_dict = loss_function(features.detach().float())
+                    vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
+
+                    vis_dict["train_loss"] = total_loss / total_num
+                    vis_dict["val_acc_1"] = acc_1
+                    vis_dict["val_acc_5"] = acc_5
+                    vis_dict["lr"] = scheduler.get_last_lr()[0]
+                    wandb.log(vis_dict, step=epoch)
+
+
+                if epoch % args.save_freq == 0 or acc_1 == top_acc:
+                    torch.save(
+                        model.state_dict(),
+                        f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
+                    )
 
     if args.wandb:
         wandb.finish()
