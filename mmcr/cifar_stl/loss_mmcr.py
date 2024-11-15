@@ -34,7 +34,7 @@ class BatchFIFOQueue():
 
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, std_hinge_cutoff:float = 0.0):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
@@ -43,7 +43,7 @@ class MMCR_Loss(nn.Module):
         self.l2_spectral_norm = l2_spectral_norm
         self.spectral_target = spectral_target
         self.spectral_topk = spectral_topk
-
+        self.std_hinge_cutoff = std_hinge_cutoff
         self.memory_bank = memory_bank
 
     def forward(self, z: Tensor) -> Tuple[Tensor, dict]:
@@ -109,13 +109,16 @@ class MMCR_Loss(nn.Module):
         batch_size = z_local.shape[0]
         loss = self.lmbda * local_nuc / batch_size - global_nuc
 
+        var_reg = torch.nn.functional.relu(self.std_hinge_cutoff - std).sum()
+        loss += var_reg
         loss_dict = {
             "loss": loss.item(),
             "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
             "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
             "mu" : mu.detach().cpu().numpy(),
-            "log_var" : log_var.detach().cpu().numpy()
+            "log_var" : log_var.detach().cpu().numpy(),
+            "var_reg" : var_reg.item(),
         }
 
         self.first_time = False

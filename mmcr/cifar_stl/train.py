@@ -26,8 +26,9 @@ def train(args):
             "weak_aug":args.weak_aug,
             "diffusion_alpha":args.diff_alpha,
             "spectral_target":args.spectral_target,
-            "spectral_topk":args.spectral_topk
-        }, project="mmcr")
+            "spectral_topk":args.spectral_topk,
+            "std_hinge_cutoff":args.std_hinge_cutoff
+        }, project="mmcr", entity="cmu-slots-group")
 
     def vis_dist(key_name, prefix, vis_dict, loss_dict):
         foo = loss_dict[key_name]
@@ -59,7 +60,7 @@ def train(args):
     stats_data = next(iter(stats_loader))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, std_hinge_cutoff=args.std_hinge_cutoff, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
     if args.wandb:
@@ -79,17 +80,17 @@ def train(args):
             optimizer.zero_grad()
 
             # forward pass
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                img_batch, labels = data_tuple
-                img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-                if args.diffusion_aug:
-                    rnd = (torch.randn_like(img_batch) * cifar_std) + cifar_mean
-                    # print(f"{img_batch.min()} {img_batch.max()} {rnd.min()} {rnd.max()}")
-                    # img_batch = (1 - args.diff_alpha) * img_batch + args.diff_alpha * rnd
-                    img_batch += args.diff_alpha * rnd
-                    # print(f"\t{img_batch.min()} {img_batch.max()}")
+            # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            img_batch, labels = data_tuple
+            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
+            if args.diffusion_aug:
+                rnd = (torch.randn_like(img_batch) * cifar_std) + cifar_mean
+                # print(f"{img_batch.min()} {img_batch.max()} {rnd.min()} {rnd.max()}")
+                # img_batch = (1 - args.diff_alpha) * img_batch + args.diff_alpha * rnd
+                img_batch += args.diff_alpha * rnd
+                # print(f"\t{img_batch.min()} {img_batch.max()}")
 
-                features, out = model(img_batch)
+            features, out = model(img_batch)
             loss, loss_dict = loss_function(out.float())
 
             # backward pass
@@ -129,6 +130,10 @@ def train(args):
                     vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
                     _, feat_dict = loss_function(features.detach().float())
                     vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
+
+                    vis_dict["var_reg"] = loss_dict["var_reg"]
+                    vis_dict["mu"] = loss_dict["mu"]
+                    vis_dict["log_var"] = loss_dict["log_var"]
 
                     vis_dict["train_loss"] = total_loss / total_num
                     vis_dict["val_acc_1"] = acc_1

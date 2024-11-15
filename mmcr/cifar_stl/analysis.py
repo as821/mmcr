@@ -21,7 +21,7 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
         for idx in range(data.shape[0]):
             feat, out = model(data[idx].cuda(non_blocking=True))
             if not use_feat:
-                feat = out
+                feat = out[..., :128]        # use means
                 feat = F.normalize(feat, dim=-1)
 
             # calculate the centroid of this image manifold
