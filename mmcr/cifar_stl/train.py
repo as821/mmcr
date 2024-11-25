@@ -27,7 +27,7 @@ def train(args):
             "diffusion_alpha":args.diff_alpha,
             "spectral_target":args.spectral_target,
             "spectral_topk":args.spectral_topk
-        }, project="mmcr")
+        }, project="mmcr", entity="cmu-slots-group")
 
     def vis_dist(key_name, prefix, vis_dict, loss_dict):
         foo = loss_dict[key_name]
@@ -73,23 +73,23 @@ def train(args):
     model = torch.compile(model, mode="max-autotune")
     top_acc = 0.0
     for epoch in range(args.epochs):
-        # model.train()
+        model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
 
             # forward pass
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                img_batch, labels = data_tuple
-                img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-                if args.diffusion_aug:
-                    rnd = (torch.randn_like(img_batch) * cifar_std) + cifar_mean
-                    # print(f"{img_batch.min()} {img_batch.max()} {rnd.min()} {rnd.max()}")
-                    # img_batch = (1 - args.diff_alpha) * img_batch + args.diff_alpha * rnd
-                    img_batch += args.diff_alpha * rnd
-                    # print(f"\t{img_batch.min()} {img_batch.max()}")
+            # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            img_batch, labels = data_tuple
+            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
+            # if args.diffusion_aug:
+            #     rnd = (torch.randn_like(img_batch) * cifar_std) + cifar_mean
+            #     # print(f"{img_batch.min()} {img_batch.max()} {rnd.min()} {rnd.max()}")
+            #     # img_batch = (1 - args.diff_alpha) * img_batch + args.diff_alpha * rnd
+            #     img_batch += args.diff_alpha * rnd
+            #     # print(f"\t{img_batch.min()} {img_batch.max()}")
 
-                features, out = model(img_batch)
+            features, out = model(img_batch)
             loss, loss_dict = loss_function(out.float())
 
             # backward pass
