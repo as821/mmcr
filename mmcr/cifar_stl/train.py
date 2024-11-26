@@ -74,7 +74,7 @@ def train(args):
     model = torch.compile(model, mode="max-autotune")
     top_acc = 0.0
     for epoch in range(args.epochs):
-        # model.train()
+        model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
@@ -83,13 +83,6 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-            if args.diffusion_aug:
-                rnd = (torch.randn_like(img_batch) * cifar_std) + cifar_mean
-                # print(f"{img_batch.min()} {img_batch.max()} {rnd.min()} {rnd.max()}")
-                # img_batch = (1 - args.diff_alpha) * img_batch + args.diff_alpha * rnd
-                img_batch += args.diff_alpha * rnd
-                # print(f"\t{img_batch.min()} {img_batch.max()}")
-
             features, out = model(img_batch)
             loss, loss_dict = loss_function(out.float())
 
@@ -109,6 +102,7 @@ def train(args):
 
         if epoch % 1 == 0:
             with torch.no_grad():
+                model.eval()
                 acc_1, acc_5 = test_one_epoch(
                     model,
                     memory_loader,
@@ -140,6 +134,7 @@ def train(args):
                     vis_dict["val_acc_5"] = acc_5
                     vis_dict["lr"] = scheduler.get_last_lr()[0]
                     wandb.log(vis_dict, step=epoch)
+                model.train()
 
 
                 if epoch % args.save_freq == 0 or acc_1 == top_acc:

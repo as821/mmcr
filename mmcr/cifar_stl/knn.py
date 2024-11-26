@@ -15,7 +15,7 @@ def test_one_epoch(
     temperature: float = 0.5,
     k: int = 200,
 ):
-    # net.eval()
+    net.eval()
     total_top1, total_top5, total_num, feature_bank, target_bank = 0.0, 0.0, 0, [], []
     with torch.no_grad():
         # generate feature bank and target bank
