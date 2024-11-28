@@ -6,6 +6,25 @@ from torch import Tensor
 from typing import Tuple
 
 
+
+class Projector(nn.Module):
+    def __init__(self):
+        super(Projector, self).__init__()
+        projector_dims = [1024, 256, 1]
+        layers = []
+        for i in range(len(projector_dims) - 2):
+            layers.append(
+                nn.Linear(projector_dims[i], projector_dims[i + 1], bias=False)
+            )
+            layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
+            layers.append(nn.ReLU())
+        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
+        
+        self.g = nn.Sequential(*layers)
+
+    def forward(self, x, y):
+        return self.g(torch.concat([x, y], dim=-1))
+
 class Model(nn.Module):
     def __init__(self, projector_dims: list = [512, 128], dataset: str = "cifar10"):
         super(Model, self).__init__()
@@ -28,19 +47,20 @@ class Model(nn.Module):
         self.f = nn.Sequential(*self.f)
 
         # projection head (Following exactly barlow twins offical repo)
-        projector_dims = [512] + projector_dims
-        layers = []
-        for i in range(len(projector_dims) - 2):
-            layers.append(
-                nn.Linear(projector_dims[i], projector_dims[i + 1], bias=False)
-            )
-            layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
-            layers.append(nn.ReLU())
-        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
-        self.g = nn.Sequential(*layers)
+        # projector_dims = [512] + projector_dims
+        # layers = []
+        # for i in range(len(projector_dims) - 2):
+        #     layers.append(
+        #         nn.Linear(projector_dims[i], projector_dims[i + 1], bias=False)
+        #     )
+        #     layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
+        #     layers.append(nn.ReLU())
+        # layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
+        # self.g = nn.Sequential(*layers)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
-        out = self.g(feature)
+        # out = self.g(feature)
+        out = None
         return feature, out

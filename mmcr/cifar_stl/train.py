@@ -5,11 +5,34 @@ import einops
 import wandb
 
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
-from mmcr.cifar_stl.models import Model
+from mmcr.cifar_stl.models import Model, Projector
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations
 
+
+import pdb
+
+def calc_metrics(pred, target):
+    with torch.no_grad():
+        correct_mask = pred == target
+        positive_correct_mask = correct_mask & pred
+        total_correct = correct_mask.sum()
+        true_positive = positive_correct_mask.sum()
+        true_negative = total_correct - true_positive
+
+        incorrect_mask = ~correct_mask
+        positive_incorrect_mask = incorrect_mask & pred
+        total_incorrect = incorrect_mask.sum()
+        false_positive = positive_incorrect_mask.sum()
+        false_negative = total_incorrect - false_positive
+
+        accuracy = total_correct / pred.shape[0]
+        precision = true_positive / (true_positive + false_positive)
+        recall = true_positive / (true_positive + false_negative)
+        fpr = false_positive / (true_positive + false_positive)
+        fnr = false_negative / (true_negative + false_negative)
+        return accuracy, precision, recall, fpr, fnr
 
 def train(args):
     if args.wandb:
@@ -43,6 +66,7 @@ def train(args):
         dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
     )
     model = Model(projector_dims=[512, 128], dataset=args.dataset)
+    projector = Projector()
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True, prefetch_factor=4, persistent_workers=True
     )
@@ -58,8 +82,15 @@ def train(args):
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=500, shuffle=False, num_workers=12)
     stats_data = next(iter(stats_loader))
 
+    # upweight positive examples since there are many more negative than positive samples when batch size > 2
+    target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda().unsqueeze(-1)
+    n_pos = target.sum()
+    n_neg = (target.shape[0] * target.shape[1]) - n_pos
+    pos_weight = n_neg / n_pos
+    loss_function = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    print(f"Using positive weight: {pos_weight} ({n_pos} {n_neg} {target.shape})")
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
     if args.wandb:
@@ -70,11 +101,14 @@ def train(args):
         cifar_std = torch.tensor([0.2023, 0.1994, 0.2010]).view(-1, 1, 1).cuda()
 
     model = model.cuda()
+    projector = projector.cuda()
     model = torch.compile(model, mode="max-autotune")
+    projector = torch.compile(projector, mode="max-autotune")
     top_acc = 0.0
     for epoch in range(args.epochs):
         model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
+        train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
 
@@ -82,8 +116,18 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-            features, out = model(img_batch)
-            loss, loss_dict = loss_function(out.float())
+            features, _ = model(img_batch)
+            
+            # run projector on every pair of features, O(N^2)
+            M = features.shape[0]
+            assert M == args.batch_size * args.n_aug
+            idx1, idx2 = torch.meshgrid(torch.arange(M), torch.arange(M), indexing="ij")
+            out = projector(features[idx1.flatten()], features[idx2.flatten()]).float()
+
+            loss = loss_function(out, target)
+
+
+            # loss, loss_dict = loss_function(out.float())
 
             # backward pass
             loss.backward()
@@ -93,9 +137,20 @@ def train(args):
             # update the training bar
             total_num += data_tuple[0].size(0)
             total_loss += loss.item() * data_tuple[0].size(0)
+
+            pred = torch.nn.functional.sigmoid(out.detach()) > 0.5
+            acc, prec, recall, fpr, fnr = calc_metrics(pred, target)
+
+            train_acc += acc
+            train_prec += prec
+            train_recall += recall
+            train_fpr += fpr
+            train_fnr += fnr
+
+
             train_bar.set_description(
-                "Train Epoch: [{}/{}] Loss: {:.4f}".format(
-                    epoch, args.epochs, loss.item()
+                "Train Epoch: [{}/{}] Loss: {:.4f}, acc: {:.4f}, prec: {:.4f} rec: {:.4f} fpr: {:.4f} fnr: {:.4f}".format(
+                    epoch, args.epochs, loss.item(), acc.item(), prec.item(), recall.item(), fpr.item(), fnr.item()
                 )
             )
 
@@ -112,22 +167,30 @@ def train(args):
 
                 if args.wandb:
                     # check manifold subspace alignment 
-                    vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
-                    vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
+                    # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
+                    # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
 
                     # visualize augmentations
                     img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                     vis_dict = visualize_augmentations(vis_dict, img_batch)
                     
                     # stats on singular values from last gradient step
-                    vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
-                    _, feat_dict = loss_function(features.detach().float())
-                    vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
+                    # vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
+                    # _, feat_dict = loss_function(features.detach().float())
+                    # vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
 
                     vis_dict["train_loss"] = total_loss / total_num
                     vis_dict["val_acc_1"] = acc_1
                     vis_dict["val_acc_5"] = acc_5
                     vis_dict["lr"] = scheduler.get_last_lr()[0]
+                    
+                    # TODO(as) actually run this on the test set...
+                    vis_dict["train_acc"] = train_acc / len(train_loader)
+                    vis_dict["train_prec"] = train_prec / len(train_loader)
+                    vis_dict["train_recall"] = train_recall / len(train_loader)
+                    vis_dict["train_fnr"] = train_fnr / len(train_loader)
+                    vis_dict["train_fpr"] = train_fpr / len(train_loader)
+
                     wandb.log(vis_dict, step=epoch)
                 model.train()
 
