@@ -16,6 +16,7 @@ parser.add_argument("--num_workers", type=int, default=16)
 parser.add_argument("--save_freq", type=int, default=5)
 parser.add_argument("--wandb", action="store_true")
 parser.add_argument("--save_folder", type=str, default="./training_checkpoints/cifar_stl")
+parser.add_argument("--pos_mult", type=float, default=1.0)
 
 parser.add_argument("--mem_bank", type=int, default=0)
 parser.add_argument("--stronger_aug", action="store_true")

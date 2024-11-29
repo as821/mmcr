@@ -86,7 +86,7 @@ def train(args):
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda().unsqueeze(-1)
     n_pos = target.sum()
     n_neg = (target.shape[0] * target.shape[1]) - n_pos
-    pos_weight = n_neg / n_pos
+    pos_weight = args.pos_mult * (n_neg / n_pos)
     loss_function = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     print(f"Using positive weight: {pos_weight} ({n_pos} {n_neg} {target.shape})")
 
