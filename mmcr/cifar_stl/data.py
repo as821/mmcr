@@ -240,10 +240,10 @@ class CifarBatchTransform:
                 ]
             elif strongest_aug:
                 lst_of_transform = [
-                    transforms.RandomResizedCrop(32, scale=(0.08, 0.85)),
+                    transforms.RandomResizedCrop(32, scale=(0.3, 0.85)),
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.RandomApply(
-                        [transforms.ColorJitter(0.6, 0.6, 0.4, 0.3)], p=0.9
+                        [transforms.ColorJitter(0.7, 0.7, 0.5, 0.4)], p=0.9
                     ),
                     transforms.RandomGrayscale(p=0.2),
                     GaussianBlur(0.75),
