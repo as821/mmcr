@@ -25,6 +25,8 @@ parser.add_argument("--spectral_target", action="store_true")
 parser.add_argument("--spectral_topk", action="store_true")
 parser.add_argument("--diffusion_aug", action="store_true")
 parser.add_argument("--diff_alpha", type=float, default=0.01)
+parser.add_argument("--std_hinge_cutoff", type=float, default=0.0)
+
 
 args = parser.parse_args()
 
