@@ -122,7 +122,7 @@ def loss_function(img_batch, model):
         aug_ev = einops.rearrange(aug_ev, "B (C H W) -> B C H W", B=img_batch.shape[0], C=img_batch.shape[1], H=img_batch.shape[2]).unsqueeze(1)
 
     # calc. model Jacobian wrt EV aug
-    J_aug_ev = calc_model_jac(aug_ev)
+    J_aug_ev = calc_model_jac(model, aug_ev)
     J_aug_ev = J_aug_ev.flatten(2, -1)
     assert len(J_aug_ev.shape) == 3
     
