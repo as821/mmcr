@@ -44,7 +44,7 @@ def train(args):
     train_dataset, memory_dataset, test_dataset = get_datasets(
         dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
     )
-    model = Model(projector_dims=[512, 128], dataset=args.dataset)
+    model = Model(projector_dims=[512, 16], dataset=args.dataset)
 
     n_workers = 16 if torch.cuda.is_available() else 0
     train_loader = torch.utils.data.DataLoader(
@@ -84,19 +84,20 @@ def train(args):
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
             loss = loss_function(img_batch, model)
 
-            # backward pass
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
 
             # update the training bar
             total_num += data_tuple[0].size(0)
             total_loss += loss.item() * data_tuple[0].size(0)
             train_bar.set_description(
-                "Train Epoch: [{}/{}] Loss: {:.4f}".format(
+                "Train Epoch: [{}/{}] Loss: {:.6f}".format(
                     epoch, args.epochs, loss.item()
                 )
             )
+
+            # backward pass
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
 
         if epoch % 1 == 0:
             with torch.no_grad():

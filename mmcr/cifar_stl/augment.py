@@ -87,7 +87,20 @@ def calc_aug_ev_var(x):
 
 
 
+def calc_model_jac(model, inp):
+    def helper(x):
+        feature, out = model(x)
+        return out.squeeze()
 
+    # TODO(as) sketchy... means running stats wont be updated
+    model.eval()            
+    J = torch.func.vmap(torch.func.jacrev(helper))(inp)
+    
+    # J_aug_ev = torch.zeros((aug_ev.shape[0], 128, *aug_ev.shape[1:]), device=aug_ev.device, dtype=aug_ev.dtype)
+    # for idx in range(aug_ev.shape[0]):
+    #     J_aug_ev[idx] = torch.autograd.functional.jacobian(helper, aug_ev[idx], create_graph=True)
+    model.train()
+    return J
 
 
 
@@ -101,25 +114,26 @@ def loss_function(img_batch, model):
         aug_ev, aug_var = calc_aug_ev_var(img_batch)
 
         # calculate augmentation variance matrix (+ apply SVD) --> TODO(as): paper notation implies U.T == Vh (so eigh could be used). may have variance matrix shape wrong
-        eval, evec = torch.linalg.eigh(aug_var)
+        U, S, Vh = torch.linalg.svd(aug_var)
+        # print(f"{torch.linalg.cond(aug_var.to(torch.float64)).item()}, {S.min()} {S.max()}")
+        intermediate = torch.bmm(U, torch.sqrt(S).unsqueeze(-1))
+        del U, S, Vh
+    
+        aug_ev = einops.rearrange(aug_ev, "B (C H W) -> B C H W", B=img_batch.shape[0], C=img_batch.shape[1], H=img_batch.shape[2]).unsqueeze(1)
 
-    # calc. model Jacobian wrt EV aug --> TODO(as): is jacrev differentiable??
-    def helper(x):
-        feature, out = model(x)
-        return out.squeeze()
-    
-    model.eval()            # TODO(as) sketchy... means running stats wont be updated
-    inp = einops.rearrange(aug_ev, "B (C H W) -> B C H W", B=img_batch.shape[0], C=img_batch.shape[1], H=img_batch.shape[2]).unsqueeze(1)
-    J_aug_ev = torch.func.vmap(torch.func.jacrev(helper))(inp)
-    model.train()
-    
+    # calc. model Jacobian wrt EV aug
+    J_aug_ev = calc_model_jac(aug_ev)
     J_aug_ev = J_aug_ev.flatten(2, -1)
     assert len(J_aug_ev.shape) == 3
     
     # calc TangentProp loss
     # intermediate = J_aug_ev @ evec @ torch.sqrt(eval)
-    intermediate = torch.bmm(torch.bmm(J_aug_ev, evec), torch.sqrt(eval).unsqueeze(-1))[..., 0]
+    intermediate = torch.bmm(J_aug_ev, intermediate)[..., 0]
     loss = torch.linalg.matrix_norm(intermediate, ord="fro") ** 2
+
+
+    # print(f"{loss}")
+    # pdb.set_trace()
 
     return loss
 
