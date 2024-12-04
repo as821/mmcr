@@ -43,6 +43,9 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
             download=False,
         )
     elif dataset == "cifar10":
+        
+        assert not strong_aug and not diffusion_aug and not weak_aug and not strongest_aug
+        
         train_data = torchvision.datasets.CIFAR10(
             root=data_dir,
             train=True,
@@ -223,67 +226,70 @@ class CifarBatchTransform:
         **kwargs,
     ):
         if train_transform:
-            if strong_aug:
-                lst_of_transform = [
-                    transforms.RandomResizedCrop(32),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomApply(
-                        [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
-                    ),
-                    transforms.RandomGrayscale(p=0.2),
-                    GaussianBlur(0.5),
-                    Solarization(0.2),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
-                ]
-            elif strongest_aug:
-                lst_of_transform = [
-                    transforms.RandomResizedCrop(32),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomApply(
-                        [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
-                    ),
-                    transforms.RandomGrayscale(p=0.2),
-                    GaussianBlur(0.75),
-                    Solarization(0.5),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
-                ]
-            elif weak_aug:
-                lst_of_transform = [
-                    transforms.RandomResizedCrop(32, scale=(0.3, 1)),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
-                ]                
-            elif diffusion_aug:
-                lst_of_transform = [
-                    transforms.RandomResizedCrop(32),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
-                ]
-            else:
-                lst_of_transform = [
-                    transforms.RandomResizedCrop(32),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomApply(
-                        [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
-                    ),
-                    transforms.RandomGrayscale(p=0.2),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
-                ]
+            # if strong_aug:
+            #     lst_of_transform = [
+            #         transforms.RandomResizedCrop(32),
+            #         transforms.RandomHorizontalFlip(p=0.5),
+            #         transforms.RandomApply(
+            #             [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
+            #         ),
+            #         transforms.RandomGrayscale(p=0.2),
+            #         GaussianBlur(0.5),
+            #         Solarization(0.2),
+            #         transforms.ToTensor(),
+            #         transforms.Normalize(
+            #             [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+            #         ),
+            #     ]
+            # elif strongest_aug:
+            #     lst_of_transform = [
+            #         transforms.RandomResizedCrop(32),
+            #         transforms.RandomHorizontalFlip(p=0.5),
+            #         transforms.RandomApply(
+            #             [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
+            #         ),
+            #         transforms.RandomGrayscale(p=0.2),
+            #         GaussianBlur(0.75),
+            #         Solarization(0.5),
+            #         transforms.ToTensor(),
+            #         transforms.Normalize(
+            #             [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+            #         ),
+            #     ]
+            # elif weak_aug:
+            #     lst_of_transform = [
+            #         transforms.RandomResizedCrop(32, scale=(0.3, 1)),
+            #         transforms.RandomHorizontalFlip(p=0.5),
+            #         transforms.ToTensor(),
+            #         transforms.Normalize(
+            #             [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+            #         ),
+            #     ]                
+            # elif diffusion_aug:
+            #     lst_of_transform = [
+            #         transforms.RandomResizedCrop(32),
+            #         transforms.RandomHorizontalFlip(p=0.5),
+            #         transforms.ToTensor(),
+            #         transforms.Normalize(
+            #             [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+            #         ),
+            #     ]
+            # else:
+            #     lst_of_transform = [
+            #         transforms.RandomResizedCrop(32),
+            #         transforms.RandomHorizontalFlip(p=0.5),
+            #         transforms.RandomApply(
+            #             [transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8
+            #         ),
+            #         transforms.RandomGrayscale(p=0.2),
+            #         transforms.ToTensor(),
+            #         transforms.Normalize(
+            #             [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+            #         ),
+            #     ]
+
+            # NOTE: normalize after we apply augmentations manually
+            lst_of_transform = [transforms.ToTensor()]
 
             self.transform = transforms.Compose(lst_of_transform)
         else:
