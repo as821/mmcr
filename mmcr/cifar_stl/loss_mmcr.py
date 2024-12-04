@@ -109,7 +109,7 @@ class MMCR_Loss(nn.Module):
         batch_size = z_local.shape[0]
         loss = self.lmbda * local_nuc / batch_size - global_nuc
 
-        var_reg = (1.0 - torch.nn.functional.sigmoid(std)).sum()
+        var_reg = (-torch.nn.functional.sigmoid(std)).mean()
         loss += var_reg
         loss_dict = {
             "loss": loss.item(),
