@@ -53,6 +53,7 @@ class MMCR_Loss(nn.Module):
         assert z.shape[-1] % 2 == 0
         splt = int(z.shape[-1] / 2)
         mu, log_var = z[..., :splt], z[..., splt:]
+        log_var = log_var * 0.0
 
         # Sample from distribution using reparameterization trick
         std = torch.exp(0.5 * log_var)
@@ -109,8 +110,9 @@ class MMCR_Loss(nn.Module):
         batch_size = z_local.shape[0]
         loss = self.lmbda * local_nuc / batch_size - global_nuc
 
-        var_reg = (-torch.nn.functional.sigmoid(std)).mean()
-        loss += var_reg
+        # var_reg = (-torch.nn.functional.sigmoid(std)).mean()
+#        var_reg = torch.nn.functional.relu(self.std_hinge_cutoff - std).mean()
+        # loss += var_reg
         loss_dict = {
             "loss": loss.item(),
             "local_nuc": local_nuc.item(),
@@ -118,7 +120,7 @@ class MMCR_Loss(nn.Module):
             "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
             "mu" : mu.detach().cpu().numpy(),
             "log_var" : log_var.detach().cpu().numpy(),
-            "var_reg" : var_reg.item(),
+            #           "var_reg" : var_reg.item(),
         }
 
         self.first_time = False
