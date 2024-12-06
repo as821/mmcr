@@ -34,7 +34,7 @@ class BatchFIFOQueue():
 
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, std_hinge_cutoff:float = 0.0):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, std_hinge_cutoff:float = 0.0, fix_log_var: float = -1):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
@@ -45,6 +45,7 @@ class MMCR_Loss(nn.Module):
         self.spectral_topk = spectral_topk
         self.std_hinge_cutoff = std_hinge_cutoff
         self.memory_bank = memory_bank
+        self.fix_log_var = fix_log_var
 
     def forward(self, z: Tensor) -> Tuple[Tensor, dict]:
         # print(f"{z.max()} {z.min()}")
@@ -53,7 +54,8 @@ class MMCR_Loss(nn.Module):
         assert z.shape[-1] % 2 == 0
         splt = int(z.shape[-1] / 2)
         mu, log_var = z[..., :splt], z[..., splt:]
-        log_var = log_var * 0.0
+        if self.fix_log_var >= 0:
+            log_var = log_var * 0.0 + self.fix_log_var
 
         # Sample from distribution using reparameterization trick
         std = torch.exp(0.5 * log_var)
@@ -113,6 +115,7 @@ class MMCR_Loss(nn.Module):
         # var_reg = (-torch.nn.functional.sigmoid(std)).mean()
 #        var_reg = torch.nn.functional.relu(self.std_hinge_cutoff - std).mean()
         # loss += var_reg
+        var_reg = 0
         loss_dict = {
             "loss": loss.item(),
             "local_nuc": local_nuc.item(),
@@ -120,7 +123,7 @@ class MMCR_Loss(nn.Module):
             "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
             "mu" : mu.detach().cpu().numpy(),
             "log_var" : log_var.detach().cpu().numpy(),
-            #           "var_reg" : var_reg.item(),
+            "var_reg" : var_reg #.item(),
         }
 
         self.first_time = False
