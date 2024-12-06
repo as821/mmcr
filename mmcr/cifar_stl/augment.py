@@ -131,10 +131,6 @@ def loss_function(img_batch, model):
     intermediate = torch.bmm(J_aug_ev, intermediate)[..., 0]
     loss = torch.linalg.matrix_norm(intermediate, ord="fro") ** 2
 
-
-    # print(f"{loss}")
-    # pdb.set_trace()
-
     return loss
 
 

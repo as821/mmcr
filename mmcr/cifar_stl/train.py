@@ -12,21 +12,7 @@ from mmcr.cifar_stl.augment import loss_function
 
 def train(args):
     if args.wandb:
-        wandb.init(config={
-            "dataset":args.dataset,
-            "n_aug": args.n_aug,
-            "batch_size": args.batch_size,
-            "lr": args.lr,
-            "epochs": args.epochs,
-            "lmbda": args.lmbda,
-            "strong_aug":args.stronger_aug,
-            "strongest_aug":args.strongest_aug,
-            "diffusion_aug":args.diffusion_aug,
-            "weak_aug":args.weak_aug,
-            "diffusion_alpha":args.diff_alpha,
-            "spectral_target":args.spectral_target,
-            "spectral_topk":args.spectral_topk
-        }, project="mmcr", entity="cmu-slots-group")
+        wandb.init(config=args, project="mmcr", entity="cmu-slots-group")
 
     def vis_dist(key_name, prefix, vis_dict, loss_dict):
         foo = loss_dict[key_name]
@@ -70,8 +56,9 @@ def train(args):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device, non_blocking=True)
-    # model = torch.compile(model, mode="max-autotune")
+    model = torch.compile(model, mode="max-autotune")
     top_acc = 0.0
+    total_step = 0
     for epoch in range(args.epochs):
         model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
@@ -99,44 +86,48 @@ def train(args):
             optimizer.step()
             scheduler.step()
 
-        if epoch % 1 == 0:
-            with torch.no_grad():
-                model.eval()
-                acc_1, acc_5 = test_one_epoch(
-                    model,
-                    memory_loader,
-                    test_loader,
-                )
-                if acc_1 > top_acc:
-                    top_acc = acc_1
-
-                if args.wandb:
-                    # check manifold subspace alignment 
-                    # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
-                    # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
-
-                    # visualize augmentations
-                    img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
-                    vis_dict = visualize_augmentations(vis_dict, img_batch)
-                    
-                    # stats on singular values from last gradient step
-                    # vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
-                    # _, feat_dict = loss_function(features.detach().float())
-                    # vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
-
-                    vis_dict["train_loss"] = total_loss / total_num
-                    vis_dict["val_acc_1"] = acc_1
-                    vis_dict["val_acc_5"] = acc_5
-                    vis_dict["lr"] = scheduler.get_last_lr()[0]
-                    wandb.log(vis_dict, step=epoch)
-                model.train()
-
-
-                if epoch % args.save_freq == 0 or acc_1 == top_acc:
-                    torch.save(
-                        model.state_dict(),
-                        f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
+            if total_step % args.log_freq == 0:
+                with torch.no_grad():
+                    model.eval()
+                    acc_1, acc_5 = test_one_epoch(
+                        model,
+                        memory_loader,
+                        test_loader,
                     )
+                    if acc_1 > top_acc:
+                        top_acc = acc_1
+
+                    if args.wandb:
+                        # visualize augmentations
+                        img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                        vis_dict = visualize_augmentations(vis_dict, img_batch)
+                        
+                        vis_dict["train_loss"] = total_loss / total_num
+                        vis_dict["val_acc_1"] = acc_1
+                        vis_dict["val_acc_5"] = acc_5
+                        vis_dict["lr"] = scheduler.get_last_lr()[0]
+                        wandb.log(vis_dict, step=total_step)
+                    model.train()
+
+
+                    if total_step % (args.log_freq * args.save_freq) == 0 or acc_1 == top_acc:
+                        torch.save(
+                            model.state_dict(),
+                            f"{args.save_folder}/{args.dataset}_{args.n_aug}_{total_step}_acc_{acc_1:0.2f}.pth",
+                        )
+            total_step += 1
+
+
+
+        # TODO(as) track Jacobian norm evaluatated at a bunch of points (check for collapse)
+
+        # TODO(as) does still sampling from the augmentation distribution help performance? (!!)
+
+        # TODO(as) try different augmentation combinations (see if changes current eval score)
+
+
+        # TODO(as) different options for removing batchnorms? (should we be using JAX instead?)
+
 
     if args.wandb:
         wandb.finish()
