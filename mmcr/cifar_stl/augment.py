@@ -129,6 +129,8 @@ def loss_function(img_batch, model):
     # calc TangentProp loss
     # intermediate = J_aug_ev @ evec @ torch.sqrt(eval)
     intermediate = torch.bmm(J_aug_ev, intermediate)[..., 0]
+    
+    # TODO(as): norm over batched matrices vs. mean per-example norm
     loss = torch.linalg.matrix_norm(intermediate, ord="fro") ** 2
 
     return loss
@@ -136,3 +138,20 @@ def loss_function(img_batch, model):
 
 
 
+
+def log_model_jacobian(vis_dict, stats_data, model, device):
+    jac_norm_sum = 0
+    batch_sz = 16
+
+    for start in range(0, stats_data.shape[0], batch_sz):
+        end = min(start + batch_sz, stats_data.shape[0])
+        btch = stats_data[start : end].unsqueeze(1).to(device)
+        jac = calc_model_jac(model, btch)
+        jac = jac.flatten(1, -1)
+
+        jac_norm_sum += torch.linalg.norm(jac, dim=1).sum()
+
+    # mean of per-sample Jacobian norms
+    vis_dict["mean_jac_norm"] = jac_norm_sum / stats_data.shape[0]
+    print(f"TEST AUG JAC NORM: {vis_dict["mean_jac_norm"]}\n")
+    return vis_dict

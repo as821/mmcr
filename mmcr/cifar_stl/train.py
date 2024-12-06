@@ -1,13 +1,14 @@
 import torch
+import torchvision
 from tqdm import tqdm
 import einops
 import wandb
 
-from mmcr.cifar_stl.data import get_datasets
+from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.analysis import visualize_augmentations
-from mmcr.cifar_stl.augment import loss_function
+from mmcr.cifar_stl.augment import loss_function, log_model_jacobian
 
 
 def train(args):
@@ -44,9 +45,9 @@ def train(args):
     )
 
     # test set with training transformations
-    # stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=100))
-    # stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=500, shuffle=False, num_workers=12)
-    # stats_data = next(iter(stats_loader))
+    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=10))
+    stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
+    stats_data = next(iter(stats_loader))[0].flatten(0, 1)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
@@ -102,6 +103,9 @@ def train(args):
                         img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                         vis_dict = visualize_augmentations(vis_dict, img_batch)
                         
+                        # track norm of the model Jacobian (across augmentations of the test set) to detect collapse
+                        vis_dict = log_model_jacobian(vis_dict, stats_data, model, device)
+
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
@@ -118,13 +122,11 @@ def train(args):
             total_step += 1
 
 
+        # TODO(as) implement more complete augmentations
 
-        # TODO(as) track Jacobian norm evaluatated at a bunch of points (check for collapse)
+        # TODO(as) try anti-collapse
 
         # TODO(as) does still sampling from the augmentation distribution help performance? (!!)
-
-        # TODO(as) try different augmentation combinations (see if changes current eval score)
-
 
         # TODO(as) different options for removing batchnorms? (should we be using JAX instead?)
 
