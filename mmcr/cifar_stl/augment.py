@@ -15,9 +15,9 @@ def bernoulli_aug(aug, orig, prob):
     # covariance matrix is N x N (where N is the size of the flattened image)
     second_mom_diag = prob * (aug**2) + (1 - prob) * (orig**2)      # E[X^2]
     var_diag = second_mom_diag - (ev ** 2)                          # E[X^2] - E[X]^2
-    
+
     # in the bernoulli case all pixels are independent of one another so covariance matrix is diagonal
-    var = torch.diag(var_diag)
+    var = torch.diag(var_diag.flatten())
     return ev, var
 
 
@@ -44,8 +44,18 @@ def calc_aug_ev_var(x):
     def random_resized_crop(x):
         pass
 
-    def jitter(x, p, param=[0.4, 0.4, 0.2, 0.1]):
-        pass
+    def jitter(x, param=[0.4, 0.4, 0.2, 0.1]):
+        # ColorJitter samples uniformly at random from range for each. Specify size 0 range to get deterministic behavior
+        mx = [(j, j) for j in [i + 1 for i in param[:-1]]] + [(param[-1], param[-1])]
+        mn = [(j, j) for j in [max(0, 1 - i) for i in param[:-1]]] + [(-1 * param[-1], -1 * param[-1])]
+        mx_jitter = torchvision.transforms.ColorJitter(*mx)(x)
+        mn_jitter = torchvision.transforms.ColorJitter(*mn)(x)
+
+        # variance of the uniform distribution ((b - a)^2) / 12 where b and a are the limits (per-pixel in our case)
+        var_diag = ((mx_jitter - mn_jitter) ** 2) / 12
+
+        # "mean" image is unjittered due to uniform distribution over parameters centered at 1
+        return x, torch.diag(var_diag.flatten())
 
     def horiz_flip(x, p):
         flip = torchvision.transforms.functional.hflip(x)
@@ -56,34 +66,19 @@ def calc_aug_ev_var(x):
         return bernoulli_aug(gs, x, p)
 
 
-    # TODO(as): augmentations are jointly-distributed variables
-    #   - EV: joint probability table 
-    #   - Variance: E[X^2] - E[X]^2
-
-
-    flip = torchvision.transforms.functional.hflip(x).flatten(1)
-    gs = torchvision.transforms.Grayscale(3)(x).flatten(1)
-    both = torchvision.transforms.functional.hflip(torchvision.transforms.Grayscale(3)(x)).flatten(1)
-    none = x.flatten(1)
     flip_prob = 0.5
     gs_prob = 0.2
 
-    # EV: E[X]
-    ev = flip_prob * (1-gs_prob) * flip             # flip, no GS
-    ev += (1 - flip_prob) * gs_prob * gs            # no flip, GS
-    ev += (1 - flip_prob) * (1 - gs_prob) * none    # no flip, no GS
-    ev += flip_prob * gs_prob * both                # flip, GS
+    ev, horiz_var = horiz_flip(x, flip_prob)
+    ev, gs_var = grayscale(ev, gs_prob)
+    ev, jitter_var = jitter(ev)
+    
+    # composition of augmentations (applied right -> left)
+    var = jitter_var @ gs_var @ horiz_var
+    
+    return ev, var
 
-    # 2nd moment: E[X^2]
-    sec_mom = flip_prob * (1-gs_prob) * flip**2             # flip, no GS
-    sec_mom += (1 - flip_prob) * gs_prob * gs**2            # no flip, GS
-    sec_mom += (1 - flip_prob) * (1 - gs_prob) * none**2    # no flip, no GS
-    sec_mom += flip_prob * gs_prob * both**2                # flip, GS
 
-    # Variance: E[X^2] - E[X]^2
-    variance = sec_mom - ev ** 2
-    variance = torch.diag_embed(variance)
-    return ev, variance
 
 
 
@@ -109,9 +104,17 @@ def loss_function(img_batch, model):
     """
     Calculate augmentation closed form TangentProp loss + modified MMCR anti-collapse objective
     """
+    assert len(img_batch.shape) == 4
     with torch.no_grad():
         # calculate augmentation expected value and variance
-        aug_ev, aug_var = calc_aug_ev_var(img_batch)
+        aug_ev = torch.zeros_like(img_batch)
+        sz = img_batch.shape[1] * img_batch.shape[2] * img_batch.shape[3]
+        aug_var = torch.zeros((img_batch.shape[0], sz, sz), dtype=img_batch.dtype, device=img_batch.device)
+        for idx in range(img_batch.shape[0]):
+            ev, var = calc_aug_ev_var(img_batch[idx])
+            aug_ev[idx] = ev
+            aug_var[idx] = var
+        aug_ev = aug_ev.unsqueeze(1)
 
         # calculate augmentation variance matrix (+ apply SVD) --> TODO(as): paper notation implies U.T == Vh (so eigh could be used). may have variance matrix shape wrong
         U, S, Vh = torch.linalg.svd(aug_var)
@@ -119,7 +122,6 @@ def loss_function(img_batch, model):
         intermediate = torch.bmm(U, torch.sqrt(S).unsqueeze(-1))
         del U, S, Vh
     
-        aug_ev = einops.rearrange(aug_ev, "B (C H W) -> B C H W", B=img_batch.shape[0], C=img_batch.shape[1], H=img_batch.shape[2]).unsqueeze(1)
 
     # calc. model Jacobian wrt EV aug
     J_aug_ev = calc_model_jac(model, aug_ev)
