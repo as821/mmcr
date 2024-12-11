@@ -8,7 +8,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.analysis import visualize_augmentations
-from mmcr.cifar_stl.augment import loss_function, log_model_jacobian
+from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs
 
 
 def train(args):
@@ -55,6 +55,7 @@ def train(args):
     if args.wandb:
         wandb.watch(model, log_freq=10)
 
+    aug_prob_map = generate_aug_probs([3, 32, 32])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
@@ -70,7 +71,7 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
-            loss = loss_function(img_batch, model)
+            loss = loss_function(img_batch, model, aug_prob_map)
 
 
             # update the training bar
