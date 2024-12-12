@@ -190,13 +190,7 @@ def loss_function(img_batch, model, aug_prob_map):
     with torch.no_grad():
         # calculate augmentation expected value and variance
         aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
-        aug_ev = aug_ev.unsqueeze(1)
 
-
-        # TODO(as) seems to work better with SVD but much slower. should be able to have this work with e'decomp. can we make it better conditioned??
-
-        # calculate augmentation variance matrix (+ apply SVD) --> TODO(as): paper notation implies U.T == Vh (so eigh could be used). may have variance matrix shape wrong
-        # print(f"{torch.linalg.cond(aug_var.to(torch.float64)).item()}, {S.min()} {S.max()}")
         # U, S, Vh = torch.linalg.svd(aug_var)
         # del Vh
 
@@ -204,28 +198,34 @@ def loss_function(img_batch, model, aug_prob_map):
         diff = (aug_var[0] - aug_var[0].T).abs().max()
     
         # print(f"{S.min()} {S.max()} {diff}")
-        # TODO(as) odd this is needed
+        # TODO(as) odd this is needed, maybe ill-conditioned?? float64 makes no difference
         U[S < 0, :] *= -1
         S = S.abs()
 
-        
-        intermediate = torch.bmm(U, torch.sqrt(S).unsqueeze(-1))
+        S = torch.sqrt(S)
+        S = torch.diag_embed(S)     # diagonal matrix of e'vals
+        intermediate = torch.bmm(U, S)
         del U, S
-    
+
+    # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
+    out = model(aug_ev)[1]
+    out = torch.nn.functional.normalize(out, dim=-1)
+    global_sing_vals = torch.linalg.svdvals(out)
+    global_nuc = global_sing_vals.sum()
 
     # calc. model Jacobian wrt EV aug
+    aug_ev = aug_ev.unsqueeze(1)
     J_aug_ev = calc_model_jac(model, aug_ev)
     J_aug_ev = J_aug_ev.flatten(2, -1)
     assert len(J_aug_ev.shape) == 3
 
     # calc TangentProp loss
-    # intermediate = J_aug_ev @ evec @ torch.sqrt(eval)
-    intermediate = torch.bmm(J_aug_ev, intermediate)[..., 0]
-    
-    # TODO(as): norm over batched matrices vs. mean per-example norm
-    loss = torch.linalg.matrix_norm(intermediate, ord="fro") ** 2
+    intermediate = torch.bmm(J_aug_ev, intermediate)
+    tangent_prop = torch.linalg.matrix_norm(intermediate, ord="fro")
+    tangent_prop = tangent_prop.mean()
 
-    # TODO(as) implement batch-level anti-collapse objective (MMCR)
+    loss = tangent_prop - global_nuc
+    print(f"{global_nuc} {tangent_prop} -> {loss}")
 
     return loss
 
