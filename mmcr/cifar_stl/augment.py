@@ -5,6 +5,7 @@ import einops
 import time
 
 import torchvision.utils as vutils
+import torch.nn.functional as F
 
 import sys
 import pdb
@@ -26,7 +27,7 @@ def bernoulli_aug(aug, orig, prob):
 
 
 
-def generate_aug_probs(img_shape):
+def generate_aug_probs(img_shape, device):
     def horiz_vert_trans_operator(img_shape):
         sz = img_shape[-2] * img_shape[-1]
         M = torch.zeros((sz, sz))        
@@ -52,7 +53,19 @@ def generate_aug_probs(img_shape):
         # M is the same across all channels (and channels are independent of one another)
         return torch.block_diag(*[M for _ in range(img_shape[0])])
 
-    return {"horiz_vert_trans" : horiz_vert_trans_operator(img_shape)}
+    # a "1" for each location in the image. this filter extracts the (patch_sz, patch_sz) patch centered at each pixel in the image (with zero padding)
+    unif_range = 3
+    patch_sz = unif_range * 2 + 1
+    inp_chan = 3
+    conv = torch.nn.Conv2d(inp_chan, patch_sz * patch_sz * inp_chan, patch_sz, stride=1, padding=unif_range, bias=False).to(device)
+    conv.weight.data.fill_(0)
+    for idx in range(patch_sz):
+        for jdx in range(patch_sz):
+            for cdx in range(inp_chan):
+                conv.weight.data[idx * patch_sz * inp_chan + jdx * inp_chan + cdx, cdx, idx, jdx] = 1
+
+
+    return {"horiz_vert_trans" : horiz_vert_trans_operator(img_shape), "horiz_vert_conv":conv}
 
 
 
@@ -92,29 +105,24 @@ def calc_aug_ev_var(x, prob_map):
         
         # second moment is the convolution of the windows of possible translations for a pair of pixels, weighted by the probability of those translations
         with torch.no_grad():
-            # a "1" for each location in the image. this filter extracts the (patch_sz, patch_sz) patch centered at each pixel in the image (with zero padding)
             unif_range = 3
-            patch_sz = unif_range * 2 + 1
+            patch_sz = unif_range * 2 + 1            
             inp_chan = 3
-            conv = torch.nn.Conv2d(inp_chan, patch_sz * patch_sz * inp_chan, patch_sz, stride=1, padding=unif_range, bias=False).to(batch.device)
-            conv.weight.data.fill_(0)
-            for idx in range(patch_sz):
-                for jdx in range(patch_sz):
-                    for cdx in range(inp_chan):
-                        conv.weight.data[idx * patch_sz * inp_chan + jdx * inp_chan + cdx, cdx, idx, jdx] = 1
+            conv = prob_map["horiz_vert_conv"]
             
             # for each pixel location in the image, we now have the set of all possible values it could take on for each possible horiz/vert translation
             patches = conv(batch).flatten(2)
             
             # take (probability-weighted) convolution of all pairs of pixels to get the second moment
             prob = torch.full((patch_sz * patch_sz * inp_chan,), 1 / (patch_sz * patch_sz), device=patches.device)
-            weighted_outer = torch.zeros((patches.shape[0], patches.shape[2], patches.shape[2], patches.shape[1]), device=patches.device)
+            weighted_outer = torch.zeros((patches.shape[0], patches.shape[2], patches.shape[2], inp_chan), device=patches.device)
             for idx in range(patches.shape[0]):     # full outer product too memory intensive with larger batch sizes
                 b = patches[idx].T
-                weighted_outer[idx] = b.unsqueeze(0) * b.unsqueeze(1)
-            weighted_outer = weighted_outer * prob
-            weighted_outer = einops.rearrange(weighted_outer, "B A D (I C) -> B A D C I", C=inp_chan)
-            weighted_outer = weighted_outer.sum(dim=-1)
+                b = b.unsqueeze(0) * b.unsqueeze(1) 
+                b = b * prob
+                b = einops.rearrange(b, "A D (I C) -> A D C I", C=inp_chan)
+                b = b.sum(dim=-1)
+                weighted_outer[idx] = b
             
             # reformat so each channel of image only interacts with entries for that channel (block_diag if it supported batching)
             shp = weighted_outer.shape
@@ -195,21 +203,21 @@ def loss_function(img_batch, model, aug_prob_map):
         # del Vh
 
         S, U = torch.linalg.eigh(aug_var)
-        diff = (aug_var[0] - aug_var[0].T).abs().max()
-    
+        
+        # diff = (aug_var[0] - aug_var[0].T).abs().max()
         # print(f"{S.min()} {S.max()} {diff}")
         # TODO(as) odd this is needed, maybe ill-conditioned?? float64 makes no difference
+        
         U[S < 0, :] *= -1
         S = S.abs()
 
         S = torch.sqrt(S)
-        S = torch.diag_embed(S)     # diagonal matrix of e'vals
-        intermediate = torch.bmm(U, S)
-        del U, S
+        intermediate = U * S.unsqueeze(-1)
+        del U, S, aug_var
 
     # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
     out = model(aug_ev)[1]
-    out = torch.nn.functional.normalize(out, dim=-1)
+    out = F.normalize(out, dim=-1)
     global_sing_vals = torch.linalg.svdvals(out)
     global_nuc = global_sing_vals.sum()
 
@@ -218,16 +226,25 @@ def loss_function(img_batch, model, aug_prob_map):
     J_aug_ev = calc_model_jac(model, aug_ev)
     J_aug_ev = J_aug_ev.flatten(2, -1)
     assert len(J_aug_ev.shape) == 3
+    
+    # scaled e'vec are the columns of the matrix
+    intermediate = intermediate.permute(0, 2, 1)
+    
+    # minimize the cosine similarity (not the dot product) of the Jacobian and the covarinace e'vec
+    # J_aug_ev = F.normalize(J_aug_ev, dim=-1)
+    # intermediate = F.normalize(intermediate, dim=1)        # e'vec are the rows now, normalize them
 
     # calc TangentProp loss
-    intermediate = torch.bmm(J_aug_ev, intermediate)
-    tangent_prop = torch.linalg.matrix_norm(intermediate, ord="fro")
+    res = torch.bmm(J_aug_ev, intermediate)
+    
+    # TODO(as): unclear if mean of norm of cosine similarity is the best loss
+    tangent_prop = torch.linalg.matrix_norm(res, ord="fro")
     tangent_prop = tangent_prop.mean()
 
     loss = tangent_prop - global_nuc
     print(f"{global_nuc} {tangent_prop} -> {loss}")
 
-    return loss
+    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item()}
 
 
 

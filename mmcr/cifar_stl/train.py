@@ -55,15 +55,16 @@ def train(args):
     if args.wandb:
         wandb.watch(model, log_freq=10)
 
-    aug_prob_map = generate_aug_probs([3, 32, 32])
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    aug_prob_map = generate_aug_probs([3, 32, 32], device)
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
     top_acc = 0.0
     total_step = 0
+    total_loss = 0.0
     for epoch in range(args.epochs):
         model.train()
-        total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
+        total_num, train_bar, vis_dict = 0, tqdm(train_loader), {}
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad()
 
@@ -71,8 +72,7 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
-            loss = loss_function(img_batch, model, aug_prob_map)
-
+            loss, loss_dict = loss_function(img_batch, model, aug_prob_map)
 
             # update the training bar
             total_num += data_tuple[0].size(0)
@@ -100,12 +100,16 @@ def train(args):
                         top_acc = acc_1
 
                     if args.wandb:
+                        # TODO(as): visualize mean aug
                         # visualize augmentations
-                        img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
-                        vis_dict = visualize_augmentations(vis_dict, img_batch)
+                        # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                        # vis_dict = visualize_augmentations(vis_dict, img_batch)
                         
                         # track norm of the model Jacobian (across augmentations of the test set) to detect collapse
                         vis_dict = log_model_jacobian(vis_dict, stats_data, model, device)
+
+                        vis_dict["svd_loss"] = loss_dict["svd"]
+                        vis_dict["tangent_loss"] = loss_dict["tangent"]
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
@@ -120,6 +124,7 @@ def train(args):
                             model.state_dict(),
                             f"{args.save_folder}/{args.dataset}_{args.n_aug}_{total_step}_acc_{acc_1:0.2f}.pth",
                         )
+                total_loss = 0
             total_step += 1
 
 
