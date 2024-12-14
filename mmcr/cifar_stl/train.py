@@ -3,11 +3,12 @@ import torchvision
 from tqdm import tqdm
 import einops
 import wandb
+import pdb
 
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.analysis import visualize_augmentations
+from mmcr.cifar_stl.analysis import visualize_augmentations, calc_manifold_subspace_alignment
 from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs
 
 
@@ -31,7 +32,7 @@ def train(args):
     train_dataset, memory_dataset, test_dataset = get_datasets(
         dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
     )
-    model = Model(projector_dims=[512, 16], dataset=args.dataset)
+    model = Model(projector_dims=[512, args.output_dim], dataset=args.dataset)
 
     n_workers = 16 if torch.cuda.is_available() else 0
     train_loader = torch.utils.data.DataLoader(
@@ -47,7 +48,8 @@ def train(args):
     # test set with training transformations
     stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=10))
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
-    stats_data = next(iter(stats_loader))[0].flatten(0, 1)
+    stats_tuple = next(iter(stats_loader))
+    stats_data = stats_tuple[0].flatten(0, 1)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
@@ -103,14 +105,18 @@ def train(args):
                         # TODO(as): visualize mean aug
                         # visualize augmentations
                         # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
-                        # vis_dict = visualize_augmentations(vis_dict, img_batch)
+                        pair = torch.concat([img_batch.detach().cpu().unsqueeze(1), loss_dict["aug_ev"]], dim=1)
+                        vis_dict = visualize_augmentations(vis_dict, pair)
+
+                        # vis class-level clustering on feature + output levels
+                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_tuple, True, 512)
+                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_tuple, False, args.output_dim)
                         
                         # track norm of the model Jacobian (across augmentations of the test set) to detect collapse
                         vis_dict = log_model_jacobian(vis_dict, stats_data, model, device)
 
                         vis_dict["svd_loss"] = loss_dict["svd"]
                         vis_dict["tangent_loss"] = loss_dict["tangent"]
-
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5

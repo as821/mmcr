@@ -244,7 +244,7 @@ def loss_function(img_batch, model, aug_prob_map):
     loss = tangent_prop - global_nuc
     print(f"{global_nuc} {tangent_prop} -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item()}
+    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item(), "aug_ev":aug_ev.detach().to("cpu", non_blocking=True)}
 
 
 

@@ -27,6 +27,7 @@ parser.add_argument("--diffusion_aug", action="store_true")
 parser.add_argument("--diff_alpha", type=float, default=0.01)
 
 parser.add_argument("--log_freq", type=int, default=1000)
+parser.add_argument("--output_dim", type=int, default=16)
 
 
 args = parser.parse_args()

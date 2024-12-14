@@ -5,18 +5,15 @@ from tqdm import tqdm
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
-
-
-def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
+def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_dim=-1):
     prefix = "feat_" if use_feat else "out_"
     model.eval()
     with torch.no_grad():        
         # 100 samples from the augmentation manfiolds of 500 images in the CIFAR-10
         data, target = data_tuple
 
-        sz = 512 if use_feat else 128
-        features = torch.zeros((data.shape[0], data.shape[1], sz), dtype=data.dtype, device="cuda")
-        centroids = torch.zeros((data.shape[0], sz), dtype=data.dtype, device="cuda")
+        features = torch.zeros((data.shape[0], data.shape[1], out_dim), dtype=data.dtype, device="cuda")
+        centroids = torch.zeros((data.shape[0], out_dim), dtype=data.dtype, device="cuda")
         aug_centroid_sim = torch.zeros((data.shape[0], data.shape[1]), device="cpu")
         for idx in range(data.shape[0]):
             feat, out = model(data[idx].cuda(non_blocking=True))
