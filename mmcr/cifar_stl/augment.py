@@ -174,7 +174,7 @@ def calc_aug_ev_var(x, prob_map):
 
 def calc_model_jac(model, inp):
     def helper(x):
-        feature, out = model(x)
+        _, out = model(x)
         return out.squeeze()
 
     # TODO(as) sketchy... means running stats wont be updated

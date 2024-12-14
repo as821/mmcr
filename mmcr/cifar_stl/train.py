@@ -105,6 +105,7 @@ def train(args):
                         # TODO(as): visualize mean aug
                         # visualize augmentations
                         # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                        model.eval()
                         pair = torch.concat([img_batch.detach().cpu().unsqueeze(1), loss_dict["aug_ev"]], dim=1)
                         vis_dict = visualize_augmentations(vis_dict, pair)
 
@@ -122,7 +123,7 @@ def train(args):
                         vis_dict["val_acc_5"] = acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
                         wandb.log(vis_dict, step=total_step)
-                    model.train()
+                        model.train()
 
 
                     if total_step % (args.log_freq * args.save_freq) == 0 or acc_1 == top_acc:

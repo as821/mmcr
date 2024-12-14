@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 
 def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_dim=-1):
     prefix = "feat_" if use_feat else "out_"
-    model.eval()
     with torch.no_grad():        
         # 100 samples from the augmentation manfiolds of 500 images in the CIFAR-10
         data, target = data_tuple
@@ -53,18 +52,16 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_
         plt.close()
 
 
-        aug_centroid_sim = aug_centroid_sim.numpy().flatten()
+        # aug_centroid_sim = aug_centroid_sim.numpy().flatten()
+        # plt.figure(figsize=(10, 6))
+        # plt.hist(aug_centroid_sim, bins=50, edgecolor='black')
+        # plt.title('Augmentation-Centroid Cosine Similarities')
+        # plt.xlabel('Cosine Similarity')
+        # plt.ylabel('Frequency')
+        # vis_dict[prefix + "aug_centroid_sim"] = aug_centroid_sim.mean()
+        # vis_dict[prefix + "aug_centroid_sim_dist"] = wandb.Image(plt)
+        # plt.close()
 
-        plt.figure(figsize=(10, 6))
-        plt.hist(aug_centroid_sim, bins=50, edgecolor='black')
-        plt.title('Augmentation-Centroid Cosine Similarities')
-        plt.xlabel('Cosine Similarity')
-        plt.ylabel('Frequency')
-        vis_dict[prefix + "aug_centroid_sim"] = aug_centroid_sim.mean()
-        vis_dict[prefix + "aug_centroid_sim_dist"] = wandb.Image(plt)
-        plt.close()
-
-    model.train()
     return vis_dict
 
 
