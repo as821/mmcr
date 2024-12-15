@@ -28,7 +28,7 @@ def bernoulli_aug(aug, orig, prob):
 
 
 def generate_aug_probs(img_shape, device):
-    def horiz_vert_trans_operator(img_shape):
+    def horiz_vert_trans_operator(img_shape, device):
         sz = img_shape[-2] * img_shape[-1]
         M = torch.zeros((sz, sz))        
         for x in range(img_shape[-2]):
@@ -48,24 +48,110 @@ def generate_aug_probs(img_shape, device):
                         # horiz and vert translation each happen with prob 1 / (2 * range + 1). Prob of both happening is that squared
                         M[m_idx, m_off_idx] = (1 / (unif_range * 2 + 1)) ** 2
         
+        # a "1" for each location in the image. this filter extracts the (patch_sz, patch_sz) patch centered at each pixel in the image (with zero padding)
+        unif_range = 3
+        patch_sz = unif_range * 2 + 1
+        inp_chan = 3
+        conv = torch.nn.Conv2d(inp_chan, patch_sz * patch_sz * inp_chan, patch_sz, stride=1, padding=unif_range, bias=False).to(device)
+        conv.weight.data.fill_(0)
+        for idx in range(patch_sz):
+            for jdx in range(patch_sz):
+                for cdx in range(inp_chan):
+                    conv.weight.data[idx * patch_sz * inp_chan + jdx * inp_chan + cdx, cdx, idx, jdx] = 1
+
+        # M is the same across all channels (and channels are independent of one another)
+        return torch.block_diag(*[M for _ in range(img_shape[0])]), conv
+
+    def zoom_operator(img_shape, unif_range=[0.3, 0.8]):
+        # NOTE: only support uniform scaling of both axes for now
+        # for each other pixel in the image, what is the probability that its value impacts the value of the current pixel (under the zoom distribution)
+        sz = img_shape[-2] * img_shape[-1]
+        M = torch.zeros((sz, sz))        
+        # for u in range(img_shape[-2]):
+        #     for v in range(img_shape[-1]):
+        #         m_idx = u * img_shape[-2] + v
+        #         for x in range(u, img_shape[-2]):
+        #             for y in range(v, img_shape[-1]):
+        #                 # TODO: div by zero
+        #                 x_scale = u / x
+        #                 y_scale = v / y
+
+
+        #                 # TODO: how much prob mass??
+
+        # NOTE: to handle the issues detailed above, will start with source rather than destination pixel
+        range_sz = unif_range[1] - unif_range[0]
+        for u in range(img_shape[-2]):
+            for v in range(img_shape[-1]):
+                m_idx = u * img_shape[-2] + v
+
+                # for a given source (x, y) location determine the bounds of the places it could end up given the current scaling parameters
+                x_mn_scale, x_mx_scale = int(x * unif_range[0]), int(x * unif_range[1])
+                y_mn_scale, y_mx_scale = int(y * unif_range[0]), int(y * unif_range[1])
+
+                if x_mn_scale == x_mx_scale and y_mn_scale == y_mx_scale:
+                    # all probability mass for this source pixel goes to a single destination
+                    m_dest_idx = x_mn_scale * img_shape[-2] + y_mn_scale
+                    M[m_dest_idx, m_idx] = 1
+                    continue
+
+                if x_mn_scale == x_mx_scale:
+                    # prob mass + dest determined entirely by y
+                    prev = unif_range[0]
+                    for y_idx in range(y_mn_scale, y_mx_scale):
+                        # find point at which Y switches to the next value, all probability mass from last switch to the next one goes to y_idx
+                        scale = v / (y_idx + 1)
+                        assert scale >= prev
+                        assert scale <= unif_range[1]
+                        m_dest_idx = x_mn_scale * img_shape[-2] + y_idx
+                        M[m_dest_idx, m_idx] = (scale - prev) / range_sz
+                        prev = scale
+
+                if y_mn_scale == y_mx_scale:
+                    # prob mass + dest determined entirely by x
+                    prev = unif_range[0]
+                    for x_idx in range(x_mn_scale, x_mx_scale):
+                        scale = u / (x_idx + 1)
+                        assert scale >= prev
+                        assert scale <= unif_range[1]
+                        m_dest_idx = x_idx * img_shape[-2] + y_mn_scale
+                        M[m_dest_idx, m_idx] = (scale - prev) / range_sz
+                        prev = scale
+
+                # since the distribution over scaling factors is uniform and we now have the bounds for the max/min scaling that can be applied
+                # we can determine the probability that this pixel will contribute to each of the destination
+                prev = unif_range[0]
+                for x_val in range(x_mn_scale, x_mx_scale):
+                    # determine scale value (prob mass)
+                    scale = u / (x_idx + 1)
+                    assert scale >= prev
+                    assert scale <= unif_range[1]
+
+                    # both axes scaled jointly. determine the y values that are traversed during this x scaling
+                    y_base_idx = int(v / prev)
+                    y_top_idx = int(v / scale)
+                    y_prev = prev
+                    for y_val in range(y_base_idx, y_top_idx):
+                        y_scale = v / (y_val + 1)
+                        assert y_scale >= y_prev
+                        assert y_scale <= scale
+                        m_dest_idx = x_val * img_shape[-2] + y_val
+                        M[m_dest_idx, m_idx] = (y_scale - y_prev) / range_sz
+                        y_prev = y_scale
+                    prev = scale
+
+
+        # TODO(as): LOTS OF PDB NEEDED TO MAKE SURE THIS WORKS AS EXPECTED!!!!
+
+
+        # TODO(as): still need to consider scaling of rows... these are given as source pixel probabilities but the destination pixel rows need to sum to 1 (do they really?)
 
 
         # M is the same across all channels (and channels are independent of one another)
         return torch.block_diag(*[M for _ in range(img_shape[0])])
 
-    # a "1" for each location in the image. this filter extracts the (patch_sz, patch_sz) patch centered at each pixel in the image (with zero padding)
-    unif_range = 3
-    patch_sz = unif_range * 2 + 1
-    inp_chan = 3
-    conv = torch.nn.Conv2d(inp_chan, patch_sz * patch_sz * inp_chan, patch_sz, stride=1, padding=unif_range, bias=False).to(device)
-    conv.weight.data.fill_(0)
-    for idx in range(patch_sz):
-        for jdx in range(patch_sz):
-            for cdx in range(inp_chan):
-                conv.weight.data[idx * patch_sz * inp_chan + jdx * inp_chan + cdx, cdx, idx, jdx] = 1
-
-
-    return {"horiz_vert_trans" : horiz_vert_trans_operator(img_shape), "horiz_vert_conv":conv}
+    trans_op, conv = horiz_vert_trans_operator(img_shape, device)
+    return {"horiz_vert_trans" : trans_op, "horiz_vert_conv":conv, "zoom":zoom_operator(img_shape)}
 
 
 
@@ -219,7 +305,7 @@ def loss_function(img_batch, model, aug_prob_map):
     out = model(aug_ev)[1]
     out = F.normalize(out, dim=-1)
     global_sing_vals = torch.linalg.svdvals(out)
-    global_nuc = global_sing_vals.sum()
+    global_nuc = global_sing_vals.sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
 
     # calc. model Jacobian wrt EV aug
     aug_ev = aug_ev.unsqueeze(1)
