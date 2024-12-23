@@ -187,21 +187,13 @@ def calc_model_jac(model, inp):
     #     J_aug_ev[idx] = torch.autograd.functional.jacobian(helper, aug_ev[idx], create_graph=True)
     return J
 
-
-
-
-def loss_function(img_batch, model, aug_prob_map):
-    """
-    Calculate augmentation closed form TangentProp loss + modified MMCR anti-collapse objective
-    """
-    assert len(img_batch.shape) == 4
+def tangent_prop_loss(aug_prob_map, img_batch, model):
     with torch.no_grad():
         # calculate augmentation expected value and variance
         aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
 
         # U, S, Vh = torch.linalg.svd(aug_var)
         # del Vh
-
         S, U = torch.linalg.eigh(aug_var)
         
         # diff = (aug_var[0] - aug_var[0].T).abs().max()
@@ -215,16 +207,11 @@ def loss_function(img_batch, model, aug_prob_map):
         intermediate = U * S.unsqueeze(-1)
         del U, S, aug_var
 
-    # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
-    out = model(aug_ev)[1]
-    out = F.normalize(out, dim=-1)
-    global_sing_vals = torch.linalg.svdvals(out)
-    global_nuc = global_sing_vals.sum()
-
     # calc. model Jacobian wrt EV aug
-    aug_ev = aug_ev.unsqueeze(1)
-    J_aug_ev = calc_model_jac(model, aug_ev)
+    img_batch = img_batch.unsqueeze(1)
+    J_aug_ev = calc_model_jac(model, img_batch)
     J_aug_ev = J_aug_ev.flatten(2, -1)
+    
     assert len(J_aug_ev.shape) == 3
     
     # scaled e'vec are the columns of the matrix
@@ -240,11 +227,49 @@ def loss_function(img_batch, model, aug_prob_map):
     # TODO(as): unclear if mean of norm of cosine similarity is the best loss
     tangent_prop = torch.linalg.matrix_norm(res, ord="fro")
     tangent_prop = tangent_prop.mean()
+    return tangent_prop
 
-    loss = tangent_prop - global_nuc
-    print(f"{global_nuc} {tangent_prop} -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item(), "aug_ev":aug_ev.detach().to("cpu", non_blocking=True)}
+def off_diagonal(x):
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+
+def vicreg_loss(model, batch):
+    # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L202
+    x = model(batch)[1]
+    x = x - x.mean(dim=0)
+    batch_sz, num_features = x.shape[0], x.shape[1]
+    
+    std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+    std_loss = torch.mean(F.relu(1 - std_x)) / 2
+
+    cov_x = (x.T @ x) / (batch_sz - 1)
+    cov_loss = off_diagonal(cov_x).pow_(2).sum().div(num_features)
+    return std_loss, cov_loss
+
+
+def loss_function(img_batch, model, aug_prob_map):
+    """
+    Calculate augmentation closed form TangentProp loss + modified MMCR anti-collapse objective
+    """
+    assert len(img_batch.shape) == 4
+
+    # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
+    # out = model(img_batch)[1]
+    # out = F.normalize(out, dim=-1)
+    # global_sing_vals = torch.linalg.svdvals(out)
+    # global_nuc = global_sing_vals.sum()
+    # global_nuc = torch.linalg.vector_norm(global_sing_vals)
+    # pdb.set_trace()
+    std_loss, cov_loss = vicreg_loss(model, img_batch)
+    tprop_loss = tangent_prop_loss(aug_prob_map, img_batch, model)
+
+    loss = tprop_loss + std_loss + cov_loss
+    print(f"{tprop_loss} ({std_loss} {cov_loss}) -> {loss}")
+
+    return loss, {"tangent":tprop_loss.item(), "std":std_loss.item(), "cov":cov_loss.item()}
 
 
 

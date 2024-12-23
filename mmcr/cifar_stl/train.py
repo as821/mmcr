@@ -106,8 +106,8 @@ def train(args):
                         # visualize augmentations
                         # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                         model.eval()
-                        pair = torch.concat([img_batch.detach().cpu().unsqueeze(1), loss_dict["aug_ev"]], dim=1)
-                        vis_dict = visualize_augmentations(vis_dict, pair)
+                        # pair = torch.concat([img_batch.detach().cpu().unsqueeze(1), loss_dict["aug_ev"]], dim=1)
+                        # vis_dict = visualize_augmentations(vis_dict, pair)
 
                         # vis class-level clustering on feature + output levels
                         vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_tuple, True, 512)
@@ -116,7 +116,8 @@ def train(args):
                         # track norm of the model Jacobian (across augmentations of the test set) to detect collapse
                         vis_dict = log_model_jacobian(vis_dict, stats_data, model, device)
 
-                        vis_dict["svd_loss"] = loss_dict["svd"]
+                        vis_dict["std_loss"] = loss_dict["std"]
+                        vis_dict["cov_loss"] = loss_dict["cov"]
                         vis_dict["tangent_loss"] = loss_dict["tangent"]
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
