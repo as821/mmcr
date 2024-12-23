@@ -28,6 +28,55 @@ def bernoulli_aug(aug, orig, prob):
 
 
 
+
+def resize_crop_operator(img_shape, zoom_factors=[1.5, 2, 2.5, 3]):
+    def _per_crop_prob_calc(M, zf, horiz_step, vert_step, h, w):
+        # calculate the source pixel coordinates from: destination pixel coordinates, zoom amount, + horiz/vert translation
+        for u in range(h):
+            for v in range(w):
+                # (u, v) is (row, col) destination crop indexing. (x, y) is (row, col) indexing of the source pixel in the original image
+                x = int((u + vert_step) / zf)
+                y = int((v + horiz_step) / zf)
+                m_source_idx = x * w + y
+
+                m_idx = u * w + v
+                M[m_idx, m_source_idx] += 1
+        return M
+                
+        
+    
+    # Discretized zoom (discretized crop sizes) allow the definition of a discrete uniform probability distribution over all crop size and horiz/vert translation pairs
+    h, w = img_shape[-2], img_shape[-1]
+    sz = h * w
+    M = torch.zeros((sz, sz)) 
+    
+    # TODO(as) this is stupid. discretize the zoom. Then just define a uniform prob. dist over all possible crops (Cart. prod. of all sizes with all valid horiz/vert translations)
+    # Then, iterate through all these crops and determine which source pixel each final pixel comes from (+ associate appropriate prob. mass to it)
+
+    n_step = 0
+    for zf in zoom_factors:
+        # determine zoom size and then find all windows of original image size that will work as a crop
+        zoom_h, zoom_w = int(zf * h), int(zf * w)
+        n_horiz_step = zoom_w - w + 1
+        n_vert_step = zoom_h - h + 1
+
+        # iterate through all possible translations of this size of crop (assigning each uniform probability)
+        for horiz_step in range(n_horiz_step):
+            for vert_step in range(n_vert_step):
+                n_step += 1
+                # determine the source image pixel that corresponds to each output crop pixel and update M
+                M = _per_crop_prob_calc(M, zf, horiz_step, vert_step, h, w)
+
+    # normalize M values by the total number of possible (crop size, horiz/vert translation) combinations
+    # NOTE: this weights all crop sizes equally so smaller crops will be more frequent than large ones (since theres more possible translations with larger zooms)
+    M /= n_step
+
+    # M is the same across all channels (and channels are independent of one another)
+    return torch.block_diag(*[M for _ in range(img_shape[0])])
+
+
+
+
 def generate_aug_probs(img_shape, device):
     def horiz_vert_trans_operator(img_shape, device):
         unif_range = 7
@@ -63,133 +112,7 @@ def generate_aug_probs(img_shape, device):
         # M is the same across all channels (and channels are independent of one another)
         return torch.block_diag(*[M for _ in range(img_shape[0])]), conv
 
-    def zoom_operator(img_shape, unif_range=[3, 3]):
-        # NOTE: only support uniform scaling of both axes for now
-        # for each other pixel in the image, what is the probability that its value impacts the value of the current pixel (under the zoom distribution)
-        sz = img_shape[-2] * img_shape[-1]
-        scale_sz = math.ceil(sz * unif_range[1])
-        M = torch.zeros((scale_sz, sz))        
-        # for u in range(img_shape[-2]):
-        #     for v in range(img_shape[-1]):
-        #         m_idx = u * img_shape[-2] + v
-        #         for x in range(u, img_shape[-2]):
-        #             for y in range(v, img_shape[-1]):
-        #                 # TODO: div by zero
-        #                 x_scale = u / x
-        #                 y_scale = v / y
-
-
-        #                 # TODO: how much prob mass??
-
-
-        # TODO(as) what about the bounds checks??? all these scaled indices assume the image size changes when in reality it will be cropped down...
-
-        # TODO(as) --> only keep those destination indices that will be in the center of the image 
-        #       M will stay the current size, but we need to adjust indexing appropriately
-        # VISUALIZE current, then likely need to center indexing on middle of image rather than top left
-
-
-        # NOTE: to handle the issues detailed above, will start with source rather than destination pixel
-        range_sz = unif_range[1] - unif_range[0]
-        for u in range(img_shape[-2]):
-            for v in range(img_shape[-1]):
-                m_idx = u * img_shape[-2] + v
-
-                # for a given source (x, y) location determine the bounds of the places it could end up given the current scaling parameters
-                x_mn_scale, x_mx_scale = int(u * unif_range[0]), int(u * unif_range[1])
-                y_mn_scale, y_mx_scale = int(v * unif_range[0]), int(v * unif_range[1])
-                
-                print(f"\n({u}, {v}): ({x_mn_scale}, {x_mx_scale}) ({y_mn_scale} {y_mx_scale}) ... ({unif_range[0]}, {unif_range[1]})")
-
-                if x_mn_scale == x_mx_scale and y_mn_scale == y_mx_scale:
-                    # all probability mass for this source pixel goes to a single destination
-                    m_dest_idx = x_mn_scale * img_shape[-2] + y_mn_scale
-                    M[m_dest_idx, m_idx] = 1
-                    continue
-
-                if x_mn_scale == x_mx_scale:
-                    # prob mass + dest determined entirely by y
-                    prev = unif_range[0]
-                    for y_idx in range(y_mn_scale, y_mx_scale+1):
-                        # find point at which Y switches to the next value, all probability mass from last switch to the next one goes to y_idx
-                        if y_idx < y_mx_scale:
-                            scale = (y_idx + 1) / v
-                        else:
-                            scale = unif_range[1]       # final index, all the rest of the prob. mass must go here
-                        
-                        print(f"\t(y-only, {y_idx}): {scale} {(scale - prev) / range_sz}")
-                        assert scale >= prev
-                        assert scale <= unif_range[1]
-                        m_dest_idx = x_mn_scale * img_shape[-2] + y_idx
-                        M[m_dest_idx, m_idx] = (scale - prev) / range_sz        # prob from uniform scaling dist that (u, v) ends up at this pixel value
-                        prev = scale
-                    continue
-
-                if y_mn_scale == y_mx_scale:
-                    # prob mass + dest determined entirely by x
-                    prev = unif_range[0]
-                    for x_idx in range(x_mn_scale, x_mx_scale + 1):
-                        if x_idx < y_mx_scale:
-                            scale = (x_idx + 1) / u
-                        else:
-                            scale = unif_range[1]
-
-                        print(f"\t(x-only, {x_idx}): {scale} {(scale - prev) / range_sz}")
-
-                        assert scale >= prev
-                        assert scale <= unif_range[1]
-                        m_dest_idx = x_idx * img_shape[-2] + y_mn_scale
-                        M[m_dest_idx, m_idx] = (scale - prev) / range_sz
-                        prev = scale
-                    continue
-
-
-
-                # since the distribution over scaling factors is uniform and we now have the bounds for the max/min scaling that can be applied
-                # we can determine the probability that this pixel will contribute to each of the destination
-                prev = unif_range[0]
-                for x_val in range(x_mn_scale, x_mx_scale + 1):
-                    # determine scale value (prob mass)
-                    if x_val < x_mx_scale:
-                        scale = (x_val + 1) / u
-                    else:
-                        scale = unif_range[1]
-                
-                    print(f"\t{x_val}: {scale} {(scale - prev) / range_sz}")
-            
-                    assert scale >= prev
-                    assert scale <= unif_range[1]
-
-                    # both axes scaled jointly. determine the y values that are traversed during this x scaling
-                    y_base_idx = int(v * prev)
-                    y_top_idx = int(v * scale)
-                    y_prev = prev
-                    for y_val in range(y_base_idx, y_top_idx + 1):
-                        if y_val < y_top_idx:
-                            y_scale = (y_val + 1) / v
-                        else:
-                            y_scale = scale
-                        
-                        print(f"\t\t({x_val}, {y_val}): {y_scale} {(y_scale - y_prev) / range_sz}")
-                        
-                        assert y_scale >= y_prev
-                        assert y_scale <= scale
-                        m_dest_idx = x_val * img_shape[-2] + y_val
-                        M[m_dest_idx, m_idx] = (y_scale - y_prev) / range_sz
-                        y_prev = y_scale
-                    prev = scale
-
-        # TODO(as): still need to consider scaling of rows... these are given as source pixel probabilities but the destination pixel rows need to sum to 1 (do they really?)
-
-
-        # M is the same across all channels (and channels are independent of one another)
-        return torch.block_diag(*[M for _ in range(img_shape[0])])
-
-    zoom_factor = 1
-    img_shape = (img_shape[0], int(img_shape[1] * zoom_factor), int(img_shape[2] * zoom_factor))
-
-    trans_op, conv = horiz_vert_trans_operator(img_shape, device)
-    return {"horiz_vert_trans" : trans_op, "horiz_vert_conv":conv, "zoom":zoom_operator(img_shape)}
+    return {"resize_crop" : resize_crop_operator(img_shape)}
 
 
 
@@ -209,21 +132,6 @@ def calc_aug_ev_var(x, prob_map):
     transforms.RandomGrayscale(p=0.2)         --> easy convex comb
         - Bernoulli var. of grayscale application
     """
-
-
-    def zoom(batch):
-        # TODO(as) generate M(theta), then apply. zoom is just scaling: y' = \alpha * y
-        # Only consider positive scaling (cropping). May have to do this in conjunction with horiz/vert translation for this to make sense
-    
-        M = prob_map["horiz_vert_trans"]
-        M = M.to(batch.device).to(batch.dtype)
-        
-        flat = batch.flatten(1).T
-        EM = M @ flat
-
-        return EM.T, None
-
-
 
     def horiz_vert_trans(batch):
         M = prob_map["horiz_vert_trans"]
@@ -274,31 +182,20 @@ def calc_aug_ev_var(x, prob_map):
         3) Perform zoom to achieve the selected crop size
         """
         
-        # TODO(as) get expected augmentation + variance for zoom 
-        # ev, zoom_var = zoom(x)
 
 
-        # NOTE: use deterministic zoom for now (effectively a fixed-size crop rather than a random sized one)
-        zoom_factor = 1
-        b, c, h, w = x.shape
-        new_h = int(h * zoom_factor)
-        new_w = int(w * zoom_factor)
-        x = torchvision.transforms.functional.resize(x, (new_h, new_w), antialias=True)
+        # TODO(as) this is stupid. discretize the zoom. Then just define a uniform prob. dist over all possible crops (Cart. prod. of all sizes with all valid horiz/vert translations)
+        # Then, iterate through all these crops and determine which source pixel each final pixel comes from (+ associate appropriate prob. mass to it)
 
-        # get expected augmentation + variance for horizontal + vertical translations
-        ev, trans_var = horiz_vert_trans(x)
-        var = trans_var
+        M = prob_map["resize_crop"].to(batch.device).to(batch.dtype)
 
-        # center crop back to original size
-        crop_h = int((new_h - h) / 2)
-        crop_w = int((new_w - w) / 2)        
-        ev = einops.rearrange(ev, "B (C H W) -> B C H W", H=new_h, W=new_w)
-        ev = ev[..., crop_h : crop_h + h, crop_w : crop_w + w]
-        ev = einops.rearrange(ev, "B C H W -> B (C H W)")
+        # mean image
+        flat = batch.flatten(1).T
+        EM = M @ flat
 
-        var = einops.rearrange(var, "B (C H W) (X Y Z) -> B C H W X Y Z", H=new_h, W=new_w, Y=new_h, Z=new_w)
-        var = var[..., crop_h : crop_h + h, crop_w : crop_w + w, :, crop_h : crop_h + h, crop_w : crop_w + w]
-        var = einops.rearrange(var, "B C H W X Y Z -> B (C H W) (X Y Z)")
+        # calculate augmentation variance
+
+
 
         return ev, var
 
@@ -308,15 +205,13 @@ def calc_aug_ev_var(x, prob_map):
     # EV needs to be in a format to go through the network
     ev = einops.rearrange(ev, "B (C H W) -> B C H W", C=x.shape[1], H=x.shape[2])
 
-    ev = ev[0]
-    x = x[0]
-
-
-    foo = (ev - ev.min()) / (ev.max() - ev.min())
-    vutils.save_image(foo, "ev.png")
-    vutils.save_image(x, "raw.png")
-    print("SAVED")
-    sys.exit()
+    # ev = ev[0]
+    # x = x[0]
+    # foo = (ev - ev.min()) / (ev.max() - ev.min())
+    # vutils.save_image(foo, "ev.png")
+    # vutils.save_image(x, "raw.png")
+    # print("SAVED")
+    # sys.exit()
 
     return ev, var
 
