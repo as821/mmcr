@@ -83,6 +83,9 @@ def train(args):
 
             # start = time.time()
 
+
+            # TODO(as): this process is incredibly slow, probably just need to pre-compute all these... (maybe we can move this into the dataloader threads??)
+
             with torch.no_grad():
                 # calculate augmentation expected value and variance
                 aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
@@ -134,11 +137,13 @@ def train(args):
             if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
                     model.eval()
+                    model = model.float()
                     acc_1, acc_5 = test_one_epoch(
-                        model.float(),
+                        model,
                         memory_loader,
                         test_loader,
                     )
+                    model = model.half()
                     if acc_1 > top_acc:
                         top_acc = acc_1
 
