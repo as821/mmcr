@@ -244,36 +244,28 @@ def calc_aug_ev_var(x, prob_map):
         # mean image
         flat = x.flatten(1).T
         EM = M @ flat
-
-        print("Entering cov calc...")
-
-
-        EM_outer = (EM.unsqueeze(1) * EM.unsqueeze(0)).permute((2, 0, 1))
-
-
+        
         # calculate augmentation variance
         cache, nstep = prob_map["resize_cache"], prob_map["resize_nstep"]
-        h, w = x.shape[-2], x.shape[-1]
-        second_mom = torch.zeros((x.shape[0], x.shape[1], h * w, h * w), device=x.device, dtype=torch.half)
         
-        x = x.flatten(2).half()
-        for var_idx in tqdm(range(h * w)):
-            uv_img = x[..., cache[var_idx]]
-            for prime_idx in range(h * w):
-                # integrate over all ((x, y), (x', y')) pairs where t((x, y)) == (u, v) and t((x', y')) == (u', v')
-                prime_img = x[..., cache[prime_idx]]
-                second_mom[..., var_idx, prime_idx] = (prime_img.unsqueeze(-1) * uv_img.unsqueeze(-2)).sum(dim=(-1, -2))
+        # for all ((u, v), (u', v')): integrate over all ((x, y), (x', y')) pairs where t((x, y)) == (u, v) and t((x', y')) == (u', v')
+        # sum over all elements in the outer product of x[..., cache] with itself along its final dimension
+        x = x.flatten(2)
+        second_mom = torch.einsum('bchw,bcdk->bchd', x[..., cache], x[..., cache])
 
         # scale by prob. of each possible augmentation
-        second_mom = second_mom.float()
         second_mom /= nstep
 
-        pdb.set_trace()
-
-        # TODO(as) annoying, but need to convert second_mom to block diag
-
-        var = second_mom - EM_outer
-        return ev, var
+        # reformat so each channel of image only interacts with entries for that channel (block_diag if it supported batching)
+        shp = second_mom.shape
+        second = torch.zeros((shp[0], shp[1] * shp[2], shp[1] * shp[3]), device=second_mom.device)
+        for idx in range(shp[1]):
+            second[:, idx * shp[2] : (idx + 1) * shp[2], idx * shp[3] : (idx + 1) * shp[3]] = second_mom[:, idx, ...]
+        del second_mom
+        EM_outer = (EM.unsqueeze(1) * EM.unsqueeze(0)).permute((2, 0, 1))
+        
+        var = second - EM_outer
+        return EM.T, var
 
     ev, rrc_var = random_resized_crop(x)
     var = rrc_var
@@ -320,7 +312,7 @@ def loss_function(img_batch, model, aug_prob_map):
     assert len(img_batch.shape) == 4
     with torch.no_grad():
         # calculate augmentation expected value and variance
-        aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
+        _, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
 
         # U, S, Vh = torch.linalg.svd(aug_var)
         # del Vh
@@ -339,14 +331,11 @@ def loss_function(img_batch, model, aug_prob_map):
         del U, S, aug_var
 
     # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
-    out = model(aug_ev)[1]
-    out = F.normalize(out, dim=-1)
-    global_sing_vals = torch.linalg.svdvals(out)
-    global_nuc = global_sing_vals.sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
+    out = model(img_batch)[1]
+    global_nuc = torch.linalg.svdvals(F.normalize(out, dim=-1)).sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
 
     # calc. model Jacobian wrt EV aug
-    aug_ev = aug_ev.unsqueeze(1)
-    J_aug_ev = calc_model_jac(model, aug_ev)
+    J_aug_ev = calc_model_jac(model, img_batch.unsqueeze(1))
     J_aug_ev = J_aug_ev.flatten(2, -1)
     assert len(J_aug_ev.shape) == 3
     
@@ -367,7 +356,7 @@ def loss_function(img_batch, model, aug_prob_map):
     loss = tangent_prop - global_nuc
     print(f"{global_nuc} {tangent_prop} -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item(), "aug_ev":aug_ev.detach().to("cpu", non_blocking=True)}
+    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item()}
 
 
 
