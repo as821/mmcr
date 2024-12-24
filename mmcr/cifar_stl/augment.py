@@ -130,44 +130,6 @@ def generate_aug_probs(img_shape, device):
         return {"resize_crop" : rc_op, "resize_nstep" : rc_nstep, "resize_cache" : rc_cache}
 
 
-
-def simple_var(u, v, u_prime, v_prime):
-    
-    # TODO:
-    #   - could pre-calculate which (x, y) map to (u, v) (for all thetas)
-    
-    v = 0
-    # for x in range(h):
-    #     for y in range(w):
-    #         for x_prime in range(h):
-    #             for y_prime in range(w):
-                    
-    #                 for zf in prob_map["zoom_factors"]:
-    #                     for horiz_step in range():
-    #                         for vert_step in range():
-                                
-    #                             # calculate transformed coordinates (u, v) that (x, y) in original image get mapped to under given theta
-    #                             u_x_calc = None
-    #                             v_y_calc = None
-    #                             u_x_prime_calc = None
-    #                             v_y_prime_calc = None
-
-    #                             if u_x_calc == u and v_y_calc == v and u_x_prime_calc == u_prime and v_y_prime_calc == v_prime:
-    #                                 v += img[x, y] * img[x_prime, y_prime] * (1 / num_steps)
-
-    cache = {}
-
-    for (x, y) in cache[(u, v)]:
-        for (x_prime, y_prime) in cache[(u_prime, v_prime)]:
-            v += img[x, y] * img[x_prime, y_prime] * (1 / num_steps)
-
-    return v
-
-
-
-
-
-
 def calc_aug_ev_var(x, prob_map):
     """
 
@@ -184,47 +146,6 @@ def calc_aug_ev_var(x, prob_map):
     transforms.RandomGrayscale(p=0.2)         --> easy convex comb
         - Bernoulli var. of grayscale application
     """
-
-    def horiz_vert_trans(batch):
-        M = prob_map["horiz_vert_trans"]
-        M = M.to(batch.device).to(batch.dtype)
-
-        # Apply M to given image to calculate the augmentation mean and variance
-        flat = batch.flatten(1).T
-        EM = M @ flat
-        
-        # second moment is the convolution of the windows of possible translations for a pair of pixels, weighted by the probability of those translations
-        with torch.no_grad():
-            unif_range = 7
-            patch_sz = unif_range * 2 + 1            
-            inp_chan = 3
-            conv = prob_map["horiz_vert_conv"]
-            
-            # for each pixel location in the image, we now have the set of all possible values it could take on for each possible horiz/vert translation
-            patches = conv(batch).flatten(2)
-            
-            # take (probability-weighted) convolution of all pairs of pixels to get the second moment
-            prob = torch.full((inp_chan, patch_sz * patch_sz), 1 / (patch_sz * patch_sz), device=patches.device)
-            weighted_outer = torch.zeros((patches.shape[0], patches.shape[2], patches.shape[2], inp_chan), device=patches.device)
-            for idx in range(patches.shape[0]):     # full outer product too memory intensive with larger batch sizes
-                b = patches[idx].T
-                b = einops.rearrange(b, "A (I C) -> A C I", C=inp_chan)
-
-                # o = b.unsqueeze(0) * b.unsqueeze(1) 
-                # o = o * prob
-                # o = o.sum(dim=-1)
-                weighted_outer[idx] = torch.einsum('chw,bhw,hw->cbh', b, b, prob)
-
-            # reformat so each channel of image only interacts with entries for that channel (block_diag if it supported batching)
-            shp = weighted_outer.shape
-            second = torch.zeros((shp[0], shp[1] * shp[3], shp[2] * shp[3]), device=weighted_outer.device)
-            for idx in range(shp[3]):
-                second[:, idx * shp[1] : (idx + 1) * shp[1], idx * shp[2] : (idx + 1) * shp[2]] = weighted_outer[..., idx]
-
-        EM_outer = (EM.unsqueeze(1) * EM.unsqueeze(0)).permute((2, 0, 1))
-        var = second - EM_outer
-        return EM.T, var
-
 
     def random_resized_crop(x):
         """
@@ -243,7 +164,7 @@ def calc_aug_ev_var(x, prob_map):
 
         # mean image
         flat = x.flatten(1).T
-        EM = M @ flat
+        EM = (M @ flat).T
         
         # calculate augmentation variance
         cache, nstep = prob_map["resize_cache"], prob_map["resize_nstep"]
@@ -256,16 +177,12 @@ def calc_aug_ev_var(x, prob_map):
         # scale by prob. of each possible augmentation
         second_mom /= nstep
 
-        # reformat so each channel of image only interacts with entries for that channel (block_diag if it supported batching)
-        shp = second_mom.shape
-        second = torch.zeros((shp[0], shp[1] * shp[2], shp[1] * shp[3]), device=second_mom.device)
-        for idx in range(shp[1]):
-            second[:, idx * shp[2] : (idx + 1) * shp[2], idx * shp[3] : (idx + 1) * shp[3]] = second_mom[:, idx, ...]
-        del second_mom
-        EM_outer = (EM.unsqueeze(1) * EM.unsqueeze(0)).permute((2, 0, 1))
-        
-        var = second - EM_outer
-        return EM.T, var
+        # var = second moment - EM^2
+        # assumes all channels are independent
+        EM_tmp = einops.rearrange(EM, "a (b c) -> a b c", b=second_mom.shape[1])
+        second_mom -= (EM_tmp.unsqueeze(-2) * EM_tmp.unsqueeze(-1))
+
+        return EM, second_mom
 
     ev, rrc_var = random_resized_crop(x)
     var = rrc_var
@@ -332,7 +249,7 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
 
 
 
-def loss_function(img_batch, model, aug_prob_map, intermediate):
+def loss_function(img_batch, model, intermediate):
     """
     Calculate augmentation closed form TangentProp loss + modified MMCR anti-collapse objective
     """
@@ -355,9 +272,6 @@ def loss_function(img_batch, model, aug_prob_map, intermediate):
     return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item()}
 
 
-
-
-
 def log_model_jacobian(vis_dict, stats_data, model, device):
     jac_norm_sum = 0
     batch_sz = 16
@@ -374,3 +288,31 @@ def log_model_jacobian(vis_dict, stats_data, model, device):
     vis_dict["mean_jac_norm"] = jac_norm_sum / stats_data.shape[0]
     print(f"TEST AUG JAC NORM: {vis_dict["mean_jac_norm"]}\n")
     return vis_dict
+
+
+
+
+
+def calc_aug_var_decomp(img_batch, aug_prob_map):
+    # TODO: this process is incredibly slow, probably just need to pre-compute all these... (maybe we can move this into the dataloader threads??)
+
+    with torch.no_grad():
+        # calculate augmentation expected value and variance
+        aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
+
+        S, U = torch.linalg.eigh(aug_var)
+        U[S < 0, :] *= -1
+        S = S.abs()
+        S = torch.sqrt(S)
+        
+        intermediate = U * S.unsqueeze(-1)
+        intermediate = intermediate.half()
+
+        # aug_var is per-channel, but intermediate needs to be flattened
+        shp = intermediate.shape
+        out = torch.zeros((shp[0], shp[1] * shp[2], shp[1] * shp[3]), device=intermediate.device, dtype=intermediate.dtype)
+        for idx in range(shp[1]):
+            start, end = idx * shp[2], (idx + 1) * shp[2]    
+            out[:, start:end, start:end] = intermediate[:, idx]
+
+        return out

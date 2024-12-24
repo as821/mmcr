@@ -10,7 +10,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.analysis import visualize_augmentations, calc_manifold_subspace_alignment
-from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs, calc_aug_ev_var
+from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs, calc_aug_ev_var, calc_aug_var_decomp
 
 
 def train(args):
@@ -80,39 +80,9 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
-
-            # start = time.time()
-
-
-            # TODO(as): this process is incredibly slow, probably just need to pre-compute all these... (maybe we can move this into the dataloader threads??)
-
-            with torch.no_grad():
-                # calculate augmentation expected value and variance
-                aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
-                
-                # step1 = time.time()
-
-                # pdb.set_trace()
-
-                S, U = torch.linalg.eigh(aug_var)
-
-                # step2 = time.time()
-
-
-                U[S < 0, :] *= -1
-                S = S.abs()
-                S = torch.sqrt(S)
-                
-                intermediate = U * S.unsqueeze(-1)
-                intermediate = intermediate.half()
-
-                del U, S, aug_var
-
-
-            # step3 = time.time()
-
+            intermediate = calc_aug_var_decomp(img_batch, aug_prob_map)
             img_batch = img_batch.half()
-            loss, loss_dict = loss_function(img_batch, model, aug_prob_map, intermediate)
+            loss, loss_dict = loss_function(img_batch, model, intermediate)
 
 
 
@@ -130,9 +100,6 @@ def train(args):
             optimizer.step()
             scheduler.step()
 
-
-            # end = time.time()
-            # print(f"time: {end - start} ({step1 - start} {step2 - step1} {step3 - step2} {end - step3})")
 
             if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
