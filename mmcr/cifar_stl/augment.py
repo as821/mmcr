@@ -111,20 +111,21 @@ def resize_crop_operator(img_shape, zoom_factors):
     M /= n_step
 
     # convert each cache entry into a tensor of flattened indices
+    cache_tensor = torch.zeros((h * w, n_step), dtype=torch.int32)
     for k in cache:
         tens = torch.tensor(cache[k])
-        out = tens[:, 0] * w + tens[:, 1]
-        cache[k] = out
+        assert tens.shape[0] == n_step
+        cache_tensor[k[0] * w + k[1]] = tens[:, 0] * w + tens[:, 1]
 
     # M is the same across all channels (and channels are independent of one another)
-    return torch.block_diag(*[M for _ in range(img_shape[0])]), n_step, cache
+    return torch.block_diag(*[M for _ in range(img_shape[0])]), n_step, cache_tensor
 
 
 
 
 def generate_aug_probs(img_shape, device):
     with torch.no_grad():    
-        zoom_factors = [1.5, 2, 2.5, 3]
+        zoom_factors = [1.25, 1.75]
         rc_op, rc_nstep, rc_cache = resize_crop_operator(img_shape, zoom_factors)
         return {"resize_crop" : rc_op, "resize_nstep" : rc_nstep, "resize_cache" : rc_cache}
 
@@ -246,29 +247,32 @@ def calc_aug_ev_var(x, prob_map):
 
         print("Entering cov calc...")
 
+
+        EM_outer = (EM.unsqueeze(1) * EM.unsqueeze(0)).permute((2, 0, 1))
+
+
         # calculate augmentation variance
         cache, nstep = prob_map["resize_cache"], prob_map["resize_nstep"]
-        second_mom = torch.zeros((x.shape[0], x.shape[1], M.shape[0], M.shape[1]), device=x.device)
         h, w = x.shape[-2], x.shape[-1]
-        for idx in range(x.shape[0]):
-            img = x[idx].flatten(1)
+        second_mom = torch.zeros((x.shape[0], x.shape[1], h * w, h * w), device=x.device, dtype=torch.half)
+        
+        x = x.flatten(2).half()
+        for var_idx in tqdm(range(h * w)):
+            uv_img = x[..., cache[var_idx]]
+            for prime_idx in range(h * w):
+                # integrate over all ((x, y), (x', y')) pairs where t((x, y)) == (u, v) and t((x', y')) == (u', v')
+                prime_img = x[..., cache[prime_idx]]
+                second_mom[..., var_idx, prime_idx] = (prime_img.unsqueeze(-1) * uv_img.unsqueeze(-2)).sum(dim=(-1, -2))
 
-            for u in range(h):
-                for v in range(w):
-                    var_idx = u * w + v
-                    uv_img = img[:, cache[(u, v)]]
-                    for u_prime in range(h):
-                        for v_prime in range(w):
-                            var_prime_index = u_prime * w + v_prime
-                            
-                            # integrate over all ((x, y), (x', y')) pairs where t((x, y)) == (u, v) and t((x', y')) == (u', v')
-                            prime_img = img[:, cache[(u_prime, v_prime)]]
-                            second_mom[idx, :, var_idx, var_prime_index] = (prime_img.unsqueeze(2) * uv_img.unsqueeze(1)).sum(dim=(1, 2))
-
+        # scale by prob. of each possible augmentation
+        second_mom = second_mom.float()
         second_mom /= nstep
 
         pdb.set_trace()
 
+        # TODO(as) annoying, but need to convert second_mom to block diag
+
+        var = second_mom - EM_outer
         return ev, var
 
     ev, rrc_var = random_resized_crop(x)
