@@ -295,65 +295,61 @@ def calc_model_jac(model, inp):
     # TODO(as) sketchy... means running stats wont be updated
     model.eval()
     J = torch.func.vmap(torch.func.jacrev(helper))(inp)
-    model.train()
 
-    # J_aug_ev = torch.zeros((aug_ev.shape[0], 128, *aug_ev.shape[1:]), device=aug_ev.device, dtype=aug_ev.dtype)
-    # for idx in range(aug_ev.shape[0]):
-    #     J_aug_ev[idx] = torch.autograd.functional.jacobian(helper, aug_ev[idx], create_graph=True)
+    # J = torch.zeros((inp.shape[0], 16, *inp.shape[1:]), device=inp.device, dtype=inp.dtype)
+    # for idx in range(inp.shape[0]):
+    #     J[idx] = torch.func.jacrev(helper)(inp[idx])
+
+    model.train()
     return J
 
 
+def calc_tangent_prop_loss(model, inp, var_decomp):
+    # Calculate the mean Frobenius norm of the dot products of the scaled eigenvectors of the augmentation variance matrix with the Jacobian of the model at the given input
+
+    def _helper(x):
+        return model(x)[1].squeeze()
+
+    def _loss_calc(x, var_decomp):
+        J = torch.func.jacrev(_helper)(x).flatten(1, -1)
+        assert len(J.shape) == 2
+        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro")
 
 
-def loss_function(img_batch, model, aug_prob_map):
+    # TODO(as) sketchy... means running stats wont be updated
+    model.eval()
+    loss = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
+
+    # J = torch.zeros((inp.shape[0], 16, *inp.shape[1:]), device=inp.device, dtype=inp.dtype)
+    # for idx in range(inp.shape[0]):
+    #     J[idx] = torch.func.jacrev(helper)(inp[idx])
+
+
+    model.train()    
+    return loss.mean()
+
+
+
+
+
+def loss_function(img_batch, model, aug_prob_map, intermediate):
     """
     Calculate augmentation closed form TangentProp loss + modified MMCR anti-collapse objective
     """
     assert len(img_batch.shape) == 4
-    with torch.no_grad():
-        # calculate augmentation expected value and variance
-        _, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
 
-        # U, S, Vh = torch.linalg.svd(aug_var)
-        # del Vh
-
-        S, U = torch.linalg.eigh(aug_var)
-        
-        # diff = (aug_var[0] - aug_var[0].T).abs().max()
-        # print(f"{S.min()} {S.max()} {diff}")
-        # TODO(as) odd this is needed, maybe ill-conditioned?? float64 makes no difference
-        
-        U[S < 0, :] *= -1
-        S = S.abs()
-
-        S = torch.sqrt(S)
-        intermediate = U * S.unsqueeze(-1)
-        del U, S, aug_var
 
     # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
-    out = model(img_batch)[1]
-    global_nuc = torch.linalg.svdvals(F.normalize(out, dim=-1)).sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
+    # out = model(img_batch)[1]
+    # global_nuc = torch.linalg.svdvals(F.normalize(out.float(), dim=-1)).sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
+    global_nuc = torch.tensor([0])
 
-    # calc. model Jacobian wrt EV aug
-    J_aug_ev = calc_model_jac(model, img_batch.unsqueeze(1))
-    J_aug_ev = J_aug_ev.flatten(2, -1)
-    assert len(J_aug_ev.shape) == 3
-    
-    # scaled e'vec are the columns of the matrix
-    intermediate = intermediate.permute(0, 2, 1)
-    
-    # minimize the cosine similarity (not the dot product) of the Jacobian and the covarinace e'vec
-    # J_aug_ev = F.normalize(J_aug_ev, dim=-1)
-    # intermediate = F.normalize(intermediate, dim=1)        # e'vec are the rows now, normalize them
+    tangent_prop = calc_tangent_prop_loss(model, img_batch, intermediate)
 
-    # calc TangentProp loss
-    res = torch.bmm(J_aug_ev, intermediate)
-    
-    # TODO(as): unclear if mean of norm of cosine similarity is the best loss
-    tangent_prop = torch.linalg.matrix_norm(res, ord="fro")
-    tangent_prop = tangent_prop.mean()
+    # pdb.set_trace()
+    # global_nuc *= 0.1
 
-    loss = tangent_prop - global_nuc
+    loss = tangent_prop #- global_nuc
     print(f"{global_nuc} {tangent_prop} -> {loss}")
 
     return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item()}

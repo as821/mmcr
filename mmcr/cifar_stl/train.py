@@ -4,12 +4,13 @@ from tqdm import tqdm
 import einops
 import wandb
 import pdb
+import time
 
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.analysis import visualize_augmentations, calc_manifold_subspace_alignment
-from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs
+from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs, calc_aug_ev_var
 
 
 def train(args):
@@ -51,16 +52,21 @@ def train(args):
     stats_tuple = next(iter(stats_loader))
     stats_data = stats_tuple[0].flatten(0, 1)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
+    # TODO: debugging!! try to overfit on a single batch
+    # data = next(iter(train_loader))
+    
     if args.wandb:
         wandb.watch(model, log_freq=10)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     aug_prob_map = generate_aug_probs([3, 32, 32], device)
+    model = model.half()
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
+    
     top_acc = 0.0
     total_step = 0
     total_loss = 0.0
@@ -74,7 +80,38 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
-            loss, loss_dict = loss_function(img_batch, model, aug_prob_map)
+
+            # start = time.time()
+
+            with torch.no_grad():
+                # calculate augmentation expected value and variance
+                aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
+                
+                # step1 = time.time()
+
+                # pdb.set_trace()
+
+                S, U = torch.linalg.eigh(aug_var)
+
+                # step2 = time.time()
+
+
+                U[S < 0, :] *= -1
+                S = S.abs()
+                S = torch.sqrt(S)
+                
+                intermediate = U * S.unsqueeze(-1)
+                intermediate = intermediate.half()
+
+                del U, S, aug_var
+
+
+            # step3 = time.time()
+
+            img_batch = img_batch.half()
+            loss, loss_dict = loss_function(img_batch, model, aug_prob_map, intermediate)
+
+
 
             # update the training bar
             total_num += data_tuple[0].size(0)
@@ -90,11 +127,15 @@ def train(args):
             optimizer.step()
             scheduler.step()
 
-            if total_step % args.log_freq == 0:
+
+            # end = time.time()
+            # print(f"time: {end - start} ({step1 - start} {step2 - step1} {step3 - step2} {end - step3})")
+
+            if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
                     model.eval()
                     acc_1, acc_5 = test_one_epoch(
-                        model,
+                        model.float(),
                         memory_loader,
                         test_loader,
                     )
