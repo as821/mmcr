@@ -4,6 +4,7 @@ import torchvision
 import einops
 import time
 import math
+from tqdm import tqdm
 
 import torchvision.utils as vutils
 import torch.nn.functional as F
@@ -29,30 +30,58 @@ def bernoulli_aug(aug, orig, prob):
 
 
 
-def resize_crop_operator(img_shape, zoom_factors=[1.5, 2, 2.5, 3]):
+def resize_crop_operator(img_shape, zoom_factors):
     def _per_crop_prob_calc(M, zf, horiz_step, vert_step, h, w):
-        # calculate the source pixel coordinates from: destination pixel coordinates, zoom amount, + horiz/vert translation
-        for u in range(h):
-            for v in range(w):
-                # (u, v) is (row, col) destination crop indexing. (x, y) is (row, col) indexing of the source pixel in the original image
-                x = int((u + vert_step) / zf)
-                y = int((v + horiz_step) / zf)
-                m_source_idx = x * w + y
 
-                m_idx = u * w + v
-                M[m_idx, m_source_idx] += 1
-        return M
-                
+        # for u in range(h):
+        #     for v in range(w):
+        #         # (u, v) is (row, col) destination crop indexing. (x, y) is (row, col) indexing of the source pixel in the original image
+        #         x = int((u + vert_step) / zf)
+        #         y = int((v + horiz_step) / zf)
+        #         m_source_idx = x * w + y
+
+        #         m_idx = u * w + v
+        #         local_M[m_idx, m_source_idx] += 1
+
+        #         for u_prime in range(h):
+        #             for v_prime in range(w):
+        #                 x_prime = int((u_prime + vert_step) / zf)
+        #                 y_prime = int((v_prime + horiz_step) / zf)
+        #                 prime_idx = x_prime * w + y_prime
+        #                 local_var[m_source_idx, prime_idx] += 1
+
+        # return local_M, local_var
+
+        # calculate the source pixel coordinates from: destination pixel coordinates, zoom amount, + horiz/vert translation
+        local_M = torch.zeros_like(M)
+        u_grid, v_grid = torch.meshgrid(torch.arange(h), torch.arange(w), indexing='ij')
+        x = ((u_grid + vert_step) / zf).int()
+        y = ((v_grid + horiz_step) / zf).int()
+        m_source_idx = (x * w + y).reshape(-1)
+        m_dest_idx = (u_grid * w + v_grid).reshape(-1)
         
+        # NOTE: can do assignment without accumulation since each m_dest_idx is unique. this implies that each (dest, source) pair is also unique
+        local_M[m_dest_idx, m_source_idx] = 1
+
+        # Outer product of counts with itself gives us the number of times each (m_source_idx, m_source_idx) pair appears
+        # counts = torch.bincount(m_source_idx, minlength=var.shape[0])
+        # local_var = torch.outer(counts, counts)
+
+        return local_M
+
     
     # Discretized zoom (discretized crop sizes) allow the definition of a discrete uniform probability distribution over all crop size and horiz/vert translation pairs
     h, w = img_shape[-2], img_shape[-1]
     sz = h * w
     M = torch.zeros((sz, sz)) 
-    
+
+    cache = {}
+    for u in range(h):
+        for v in range(w):
+            cache[(u, v)] = []
+
     # TODO(as) this is stupid. discretize the zoom. Then just define a uniform prob. dist over all possible crops (Cart. prod. of all sizes with all valid horiz/vert translations)
     # Then, iterate through all these crops and determine which source pixel each final pixel comes from (+ associate appropriate prob. mass to it)
-
     n_step = 0
     for zf in zoom_factors:
         # determine zoom size and then find all windows of original image size that will work as a crop
@@ -61,58 +90,80 @@ def resize_crop_operator(img_shape, zoom_factors=[1.5, 2, 2.5, 3]):
         n_vert_step = zoom_h - h + 1
 
         # iterate through all possible translations of this size of crop (assigning each uniform probability)
-        for horiz_step in range(n_horiz_step):
+        for horiz_step in tqdm(range(n_horiz_step)):
             for vert_step in range(n_vert_step):
                 n_step += 1
                 # determine the source image pixel that corresponds to each output crop pixel and update M
-                M = _per_crop_prob_calc(M, zf, horiz_step, vert_step, h, w)
+                local_M = _per_crop_prob_calc(M, zf, horiz_step, vert_step, h, w)
+                M += local_M
+
+                # prep (u, v) -> (x, y) cache for variance calculation
+                for u in range(w):
+                    for v in range(h):
+                        x = int((u + vert_step) / zf)
+                        y = int((v + horiz_step) / zf)
+                        cache[(u, v)].append((x, y))
+
+
 
     # normalize M values by the total number of possible (crop size, horiz/vert translation) combinations
     # NOTE: this weights all crop sizes equally so smaller crops will be more frequent than large ones (since theres more possible translations with larger zooms)
     M /= n_step
 
+    # convert each cache entry into a tensor of flattened indices
+    for k in cache:
+        tens = torch.tensor(cache[k])
+        out = tens[:, 0] * w + tens[:, 1]
+        cache[k] = out
+
     # M is the same across all channels (and channels are independent of one another)
-    return torch.block_diag(*[M for _ in range(img_shape[0])])
+    return torch.block_diag(*[M for _ in range(img_shape[0])]), n_step, cache
 
 
 
 
 def generate_aug_probs(img_shape, device):
-    def horiz_vert_trans_operator(img_shape, device):
-        unif_range = 7
-        
-        sz = img_shape[-2] * img_shape[-1]
-        M = torch.zeros((sz, sz))        
-        for x in range(img_shape[-2]):
-            for y in range(img_shape[-1]):
-                m_idx = x * img_shape[-2] + y
-                
-                # NOTE: assume uniform dist over some max translation for both horizontal and vertical for initial simplicity
-                for x_off in range(-1 * unif_range, unif_range):
-                    if x_off + x < 0 or x_off + x >= img_shape[-1]:
-                        continue
-                    for y_off in range(-1 * unif_range, unif_range):
-                        if y_off + y < 0 or y_off + y >= img_shape[-2]:
-                            continue
-                        m_off_idx = (x + x_off) * img_shape[-2] + (y + y_off)
-                        
-                        # horiz and vert translation each happen with prob 1 / (2 * range + 1). Prob of both happening is that squared
-                        M[m_idx, m_off_idx] = (1 / (unif_range * 2 + 1)) ** 2
-        
-        # a "1" for each location in the image. this filter extracts the (patch_sz, patch_sz) patch centered at each pixel in the image (with zero padding)
-        patch_sz = unif_range * 2 + 1
-        inp_chan = 3
-        conv = torch.nn.Conv2d(inp_chan, patch_sz * patch_sz * inp_chan, patch_sz, stride=1, padding=unif_range, bias=False).to(device)
-        conv.weight.data.fill_(0)
-        for idx in range(patch_sz):
-            for jdx in range(patch_sz):
-                for cdx in range(inp_chan):
-                    conv.weight.data[idx * patch_sz * inp_chan + jdx * inp_chan + cdx, cdx, idx, jdx] = 1
+    with torch.no_grad():    
+        zoom_factors = [1.5, 2, 2.5, 3]
+        rc_op, rc_nstep, rc_cache = resize_crop_operator(img_shape, zoom_factors)
+        return {"resize_crop" : rc_op, "resize_nstep" : rc_nstep, "resize_cache" : rc_cache}
 
-        # M is the same across all channels (and channels are independent of one another)
-        return torch.block_diag(*[M for _ in range(img_shape[0])]), conv
 
-    return {"resize_crop" : resize_crop_operator(img_shape)}
+
+def simple_var(u, v, u_prime, v_prime):
+    
+    # TODO:
+    #   - could pre-calculate which (x, y) map to (u, v) (for all thetas)
+    
+    v = 0
+    # for x in range(h):
+    #     for y in range(w):
+    #         for x_prime in range(h):
+    #             for y_prime in range(w):
+                    
+    #                 for zf in prob_map["zoom_factors"]:
+    #                     for horiz_step in range():
+    #                         for vert_step in range():
+                                
+    #                             # calculate transformed coordinates (u, v) that (x, y) in original image get mapped to under given theta
+    #                             u_x_calc = None
+    #                             v_y_calc = None
+    #                             u_x_prime_calc = None
+    #                             v_y_prime_calc = None
+
+    #                             if u_x_calc == u and v_y_calc == v and u_x_prime_calc == u_prime and v_y_prime_calc == v_prime:
+    #                                 v += img[x, y] * img[x_prime, y_prime] * (1 / num_steps)
+
+    cache = {}
+
+    for (x, y) in cache[(u, v)]:
+        for (x_prime, y_prime) in cache[(u_prime, v_prime)]:
+            v += img[x, y] * img[x_prime, y_prime] * (1 / num_steps)
+
+    return v
+
+
+
 
 
 
@@ -187,15 +238,36 @@ def calc_aug_ev_var(x, prob_map):
         # TODO(as) this is stupid. discretize the zoom. Then just define a uniform prob. dist over all possible crops (Cart. prod. of all sizes with all valid horiz/vert translations)
         # Then, iterate through all these crops and determine which source pixel each final pixel comes from (+ associate appropriate prob. mass to it)
 
-        M = prob_map["resize_crop"].to(batch.device).to(batch.dtype)
+        M = prob_map["resize_crop"].to(x.device).to(x.dtype)
 
         # mean image
-        flat = batch.flatten(1).T
+        flat = x.flatten(1).T
         EM = M @ flat
 
+        print("Entering cov calc...")
+
         # calculate augmentation variance
+        cache, nstep = prob_map["resize_cache"], prob_map["resize_nstep"]
+        second_mom = torch.zeros((x.shape[0], x.shape[1], M.shape[0], M.shape[1]), device=x.device)
+        h, w = x.shape[-2], x.shape[-1]
+        for idx in range(x.shape[0]):
+            img = x[idx].flatten(1)
 
+            for u in range(h):
+                for v in range(w):
+                    var_idx = u * w + v
+                    uv_img = img[:, cache[(u, v)]]
+                    for u_prime in range(h):
+                        for v_prime in range(w):
+                            var_prime_index = u_prime * w + v_prime
+                            
+                            # integrate over all ((x, y), (x', y')) pairs where t((x, y)) == (u, v) and t((x', y')) == (u', v')
+                            prime_img = img[:, cache[(u_prime, v_prime)]]
+                            second_mom[idx, :, var_idx, var_prime_index] = (prime_img.unsqueeze(2) * uv_img.unsqueeze(1)).sum(dim=(1, 2))
 
+        second_mom /= nstep
+
+        pdb.set_trace()
 
         return ev, var
 
