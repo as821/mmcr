@@ -51,7 +51,7 @@ def train(args):
     stats_tuple = next(iter(stats_loader))
     stats_data = stats_tuple[0].flatten(0, 1)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
 
     if args.wandb:
