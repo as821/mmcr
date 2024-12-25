@@ -125,7 +125,7 @@ def resize_crop_operator(img_shape, zoom_factors):
 
 def generate_aug_probs(img_shape, device):
     with torch.no_grad():    
-        zoom_factors = [1.25, 1.75]
+        zoom_factors = [1.25, 2, 3]
         rc_op, rc_nstep, rc_cache = resize_crop_operator(img_shape, zoom_factors)
         return {"resize_crop" : rc_op, "resize_nstep" : rc_nstep, "resize_cache" : rc_cache}
 
@@ -172,7 +172,8 @@ def calc_aug_ev_var(x, prob_map):
         # for all ((u, v), (u', v')): integrate over all ((x, y), (x', y')) pairs where t((x, y)) == (u, v) and t((x', y')) == (u', v')
         # sum over all elements in the outer product of x[..., cache] with itself along its final dimension
         x = x.flatten(2)
-        second_mom = torch.einsum('bchw,bcdk->bchd', x[..., cache], x[..., cache])
+        slc = x[..., cache]
+        second_mom = torch.einsum('bchw,bcdk->bchd', slc, slc)
 
         # scale by prob. of each possible augmentation
         second_mom /= nstep
@@ -187,6 +188,11 @@ def calc_aug_ev_var(x, prob_map):
     ev, rrc_var = random_resized_crop(x)
     var = rrc_var
     
+
+    # TODO(as) apply horiz flip, grayscale, + jitter bernoulli augmentations
+
+
+
     # EV needs to be in a format to go through the network
     ev = einops.rearrange(ev, "B (C H W) -> B C H W", C=x.shape[1], H=x.shape[2])
 

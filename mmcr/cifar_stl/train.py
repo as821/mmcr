@@ -27,6 +27,8 @@ def train(args):
 
     torch.set_float32_matmul_precision('high')
 
+    torch.backends.cuda.preferred_linalg_library(backend="cusolver")
+
     # NOTE: force single "augmentation", actually just transforms to Tensor + normalizes
     args.n_aug = 1
 
@@ -110,7 +112,6 @@ def train(args):
                         memory_loader,
                         test_loader,
                     )
-                    model = model.half()
                     if acc_1 > top_acc:
                         top_acc = acc_1
 
@@ -119,8 +120,9 @@ def train(args):
                         # visualize augmentations
                         # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                         model.eval()
-                        pair = torch.concat([img_batch.detach().cpu().unsqueeze(1), loss_dict["aug_ev"]], dim=1)
-                        vis_dict = visualize_augmentations(vis_dict, pair)
+                        
+                        # pair = torch.concat([img_batch.detach().cpu().unsqueeze(1), loss_dict["aug_ev"]], dim=1)
+                        # vis_dict = visualize_augmentations(vis_dict, pair)
 
                         # vis class-level clustering on feature + output levels
                         vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_tuple, True, 512)
@@ -144,6 +146,7 @@ def train(args):
                             model.state_dict(),
                             f"{args.save_folder}/{args.dataset}_{args.n_aug}_{total_step}_acc_{acc_1:0.2f}.pth",
                         )
+                    model = model.half()
                 total_loss = 0
             total_step += 1
 
