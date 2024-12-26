@@ -253,6 +253,24 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
 
 
 
+def off_diagonal(x):
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+
+def vicreg_loss(model, batch):
+    # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L202
+    x = model(batch)[1]
+    x = x - x.mean(dim=0)
+    batch_sz, num_features = x.shape[0], x.shape[1]
+    
+    std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+    std_loss = torch.mean(F.relu(1 - std_x)) / 2
+
+    cov_x = (x.T @ x) / (batch_sz - 1)
+    cov_loss = off_diagonal(cov_x).pow_(2).sum().div(num_features)
+    return std_loss, cov_loss
 
 
 def loss_function(img_batch, model, intermediate):
@@ -265,17 +283,19 @@ def loss_function(img_batch, model, intermediate):
     # batch-level anti-collapse objective (MMCR) --> maximize singular values of normalized mean augmentations
     # out = model(img_batch)[1]
     # global_nuc = torch.linalg.svdvals(F.normalize(out.float(), dim=-1)).sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
-    global_nuc = torch.tensor([0])
+
+    # NOTE: if we allow the update of BatchNorm running counts when calc vicreg_loss, loss diverges for some reason...
+    model.eval()
+
+    std_loss, cov_loss = vicreg_loss(model, img_batch)
+    # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
 
     tangent_prop = calc_tangent_prop_loss(model, img_batch, intermediate)
+    loss = tangent_prop + 0.1 * std_loss + cov_loss
 
-    # pdb.set_trace()
-    # global_nuc *= 0.1
+    print(f"{tangent_prop} {std_loss} {cov_loss} -> {loss}")
 
-    loss = tangent_prop #- global_nuc
-    print(f"{global_nuc} {tangent_prop} -> {loss}")
-
-    return loss, {"tangent":tangent_prop.item(), "svd":global_nuc.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):
