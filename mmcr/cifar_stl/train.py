@@ -5,6 +5,7 @@ import einops
 import wandb
 import pdb
 import time
+import numpy as np
 
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
@@ -33,13 +34,13 @@ def train(args):
     args.n_aug = 1
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
-        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
+        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug, aug_var_root=args.aug_var_root
     )
     model = Model(projector_dims=[512, args.output_dim], dataset=args.dataset)
 
     n_workers = 16 if torch.cuda.is_available() else 0
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=n_workers #, pin_memory=True, drop_last=True, prefetch_factor=4, persistent_workers=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=n_workers, drop_last=True, pin_memory=True #, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=n_workers
@@ -64,7 +65,7 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    aug_prob_map = generate_aug_probs([3, 32, 32], device)
+    aug_prob_map = generate_aug_probs([3, 32, 32])
     model = model.half()
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
@@ -79,10 +80,16 @@ def train(args):
             optimizer.zero_grad()
 
             # forward pass
-            # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            img_batch, labels = data_tuple
-            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
-            intermediate = calc_aug_var_decomp(img_batch, aug_prob_map)
+            if args.aug_var_root != "":
+                # load pre-computed augmentation variance decomposition
+                img_batch, labels, intermediate = data_tuple
+                intermediate = intermediate.to(device, non_blocking=True)
+                img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
+            else:
+                img_batch, labels = data_tuple
+                img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
+                intermediate = calc_aug_var_decomp(img_batch, aug_prob_map)
+                
             img_batch = img_batch.half()
             loss, loss_dict = loss_function(img_batch, model, intermediate)
 

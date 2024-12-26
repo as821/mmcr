@@ -3,6 +3,9 @@ from mmcr.cifar_stl.train import train
 from argparse import ArgumentParser
 # import submitit
 
+import warnings
+warnings.filterwarnings("ignore", "You are using `torch.load` with `weights_only=False`*.")
+
 parser = ArgumentParser()
 parser.add_argument("--dataset", type=str, default="cifar10")
 parser.add_argument("--batch_size", type=int, default=32)
@@ -29,6 +32,7 @@ parser.add_argument("--diff_alpha", type=float, default=0.01)
 parser.add_argument("--log_freq", type=int, default=1000)
 parser.add_argument("--output_dim", type=int, default=16)
 
+parser.add_argument("--aug_var_root", type=str, default="")
 
 args = parser.parse_args()
 

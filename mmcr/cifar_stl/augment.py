@@ -123,7 +123,7 @@ def resize_crop_operator(img_shape, zoom_factors):
 
 
 
-def generate_aug_probs(img_shape, device):
+def generate_aug_probs(img_shape):
     with torch.no_grad():    
         zoom_factors = [1.25, 2, 3]
         rc_op, rc_nstep, rc_cache = resize_crop_operator(img_shape, zoom_factors)

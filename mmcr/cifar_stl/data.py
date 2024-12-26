@@ -9,12 +9,38 @@ import torchvision
 import torchvision.transforms.functional as TF
 from torchvision.datasets import CIFAR10
 import torch
+import numpy as np
+import os
 
 import random
 from PIL import Image, ImageOps, ImageFilter
 
 
-def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, **kwargs):
+
+class AugVarDataset(torch.utils.data.Dataset):
+    def __init__(self, dset_root, aug_var_root, transform):
+        self.dset = torchvision.datasets.CIFAR10(
+            root=dset_root,
+            train=True,
+            transform=transform,
+            download=True,
+        )
+        self.aug_var_root = aug_var_root
+
+    def __len__(self):
+        return len(self.dset)
+
+    def __getitem__(self, idx):
+        out = self.dset[idx]
+        if self.aug_var_root != "":
+            return *out, torch.load(self.aug_var_root + "/" + str(idx) + ".pt")
+        else:
+            return out
+
+
+
+
+def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, aug_var_root="", **kwargs):
     data_dir = "./datasets/"
     if dataset == "stl10":
         train_split = "train" if supervised else "train+unlabeled"
@@ -46,9 +72,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
         
         assert not strong_aug and not diffusion_aug and not weak_aug and not strongest_aug
         
-        train_data = torchvision.datasets.CIFAR10(
-            root=data_dir,
-            train=True,
+        train_data = AugVarDataset(
+            dset_root=data_dir,
             transform=CifarBatchTransform(
                 train_transform=True,
                 batch_transform=batch_transform,
@@ -59,7 +84,7 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 diffusion_aug=diffusion_aug,
                 **kwargs,
             ),
-            download=True,
+            aug_var_root=aug_var_root
         )
         memory_data = torchvision.datasets.CIFAR10(
             root=data_dir,
