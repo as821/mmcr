@@ -333,12 +333,4 @@ def calc_aug_var_decomp(img_batch, aug_prob_map):
         
         intermediate = U * S.unsqueeze(-1)
         intermediate = intermediate.half()
-
-        # aug_var is per-channel, but intermediate needs to be flattened
-        shp = intermediate.shape
-        out = torch.zeros((shp[0], shp[1] * shp[2], shp[1] * shp[3]), device=intermediate.device, dtype=intermediate.dtype)
-        for idx in range(shp[1]):
-            start, end = idx * shp[2], (idx + 1) * shp[2]    
-            out[:, start:end, start:end] = intermediate[:, idx]
-
-        return out
+        return intermediate

@@ -40,7 +40,7 @@ def train(args):
 
     n_workers = 16 if torch.cuda.is_available() else 0
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=n_workers, drop_last=True, pin_memory=False #, prefetch_factor=4, persistent_workers=True
+        train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=n_workers, drop_last=True, pin_memory=False #, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=n_workers
@@ -70,6 +70,7 @@ def train(args):
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
     
+    intermediate_cpu = torch.zeros((args.batch_size, 3, 1024, 1024), dtype=torch.float16).pin_memory()
     intermediate = torch.zeros((args.batch_size, 3 * 1024, 3 * 1024), dtype=torch.float16, device=device)
     
     top_acc = 0.0
@@ -89,14 +90,18 @@ def train(args):
 
                 img_batch, labels, indices = data_tuple
                 for idx in range(indices.shape[0]):
-                    intermediate[idx] = torch.load(args.aug_var_root + "/" + str(indices[idx].item()) + ".pt")
-                
+                    intermediate_cpu[idx] = torch.load(args.aug_var_root + "/" + str(indices[idx].item()) + ".pt")
                 img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
             else:
                 img_batch, labels = data_tuple
                 img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
-                intermediate = calc_aug_var_decomp(img_batch, aug_prob_map)
-                
+                intermediate_cpu = calc_aug_var_decomp(img_batch, aug_prob_map)
+
+            # intermediate is currently per-channel but needs to be block diagonal instead
+            for idx in range(3):
+                start, end = idx * 1024, (idx + 1) * 1024    
+                intermediate[:, start:end, start:end] = intermediate_cpu[:, idx]
+
             img_batch = img_batch.half()
             loss, loss_dict = loss_function(img_batch, model, intermediate)
 
