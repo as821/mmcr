@@ -11,6 +11,7 @@ from torchvision.datasets import CIFAR10
 import torch
 import numpy as np
 import os
+import gc
 
 import random
 from PIL import Image, ImageOps, ImageFilter
@@ -31,11 +32,16 @@ class AugVarDataset(torch.utils.data.Dataset):
         return len(self.dset)
 
     def __getitem__(self, idx):
-        out = self.dset[idx]
         if self.aug_var_root != "":
-            return *out, torch.load(self.aug_var_root + "/" + str(idx) + ".pt")
+            return *self.dset[idx], idx
+            
+            # https://stackoverflow.com/questions/71838796/pytorch-dataset-leaking-memory-with-basic-i-o-operation
+            # out = self.dset[idx]
+            # intermediate = torch.load(self.aug_var_root + "/" + str(idx) + ".pt")
+            # gc.collect()
+            # return *out, intermediate
         else:
-            return out
+            return self.dset[idx]
 
 
 
