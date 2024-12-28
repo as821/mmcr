@@ -54,14 +54,15 @@ def train(args):
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
     stats_tuple = next(iter(stats_loader))
     stats_data = stats_tuple[0].flatten(0, 1)
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=20),     # Linear warmup for 10 steps
+        torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.05, end_factor=1.0, total_iters=30),     # Linear warmup for 10 steps
         torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
     ])
-
+    scaler = torch.amp.GradScaler(device)
 
     # TODO: debugging!! try to overfit on a single batch
     # data = next(iter(train_loader))
@@ -69,10 +70,9 @@ def train(args):
     if args.wandb:
         wandb.watch(model, log_freq=10)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     c, h, w = 3, 32, 32
     aug_prob_map = generate_aug_probs([c, h, w])
-    model = model.half()
+    model = model.to(torch.float16)
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
     
@@ -86,7 +86,7 @@ def train(args):
         model.train()
         total_num, train_bar, vis_dict = 0, tqdm(train_loader), {}
         for step, data_tuple in enumerate(train_bar):
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             # forward pass
             if args.aug_var_root != "":
@@ -108,7 +108,7 @@ def train(args):
                 start, end = idx * h * w, (idx + 1) * h * w    
                 intermediate[:, start:end, start:end] = intermediate_cpu[:, idx]
 
-            img_batch = img_batch.half()
+            img_batch = img_batch.to(torch.float16)
             loss, loss_dict = loss_function(img_batch, model, intermediate)
 
 
@@ -123,10 +123,21 @@ def train(args):
             )
 
             # backward pass
-            loss.backward()
-            optimizer.step()
+            # loss.backward()
+            # optimizer.step()
+            
+            loss = loss.float()
+            scaler.scale(loss).backward()
+            
+            # AMP does not work properly with vamp(jacrev) code for some reason. Still want to scale losses and parameter data/grad need to be in fp32
+            model = model.to(torch.float32)
+
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
+            # return to float16 after the update
+            model = model.to(torch.float16)
 
             if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
@@ -171,7 +182,7 @@ def train(args):
                             model.state_dict(),
                             f"{args.save_folder}/{args.dataset}_{args.n_aug}_{total_step}_acc_{acc_1:0.2f}.pth",
                         )
-                    model = model.half()
+                    model = model.to(torch.float16)
                 total_loss = 0
             total_step += 1
 

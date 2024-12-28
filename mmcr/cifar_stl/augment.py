@@ -261,7 +261,7 @@ def off_diagonal(x):
 
 def vicreg_loss(model, batch):
     # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L202
-    x = model(batch)[1]
+    x = F.normalize(model(batch)[1])
     x = x - x.mean(dim=0)
     batch_sz, num_features = x.shape[0], x.shape[1]
     
@@ -295,7 +295,7 @@ def loss_function(img_batch, model, intermediate):
 
     tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
     jac_norm_loss = 1 / mean_jac_norm
-    loss = tangent_prop + jac_norm_loss
+    loss = tangent_prop + jac_norm_loss + std_loss + cov_loss
     # loss = cov_loss + std_loss
 
     print(f"{tangent_prop} {jac_norm_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
@@ -335,5 +335,5 @@ def calc_aug_var_decomp(img_batch, aug_prob_map):
         S = torch.sqrt(S)
         
         intermediate = U * S.unsqueeze(-1)
-        intermediate = intermediate.half()
+        intermediate = intermediate.to(torch.float16)
         return intermediate
