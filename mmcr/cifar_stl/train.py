@@ -40,7 +40,7 @@ def train(args):
 
     n_workers = 16 if torch.cuda.is_available() else 0
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=n_workers, drop_last=True, pin_memory=False #, prefetch_factor=4, persistent_workers=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=n_workers, drop_last=True, pin_memory=False #, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=n_workers
@@ -56,7 +56,12 @@ def train(args):
     stats_data = stats_tuple[0].flatten(0, 1)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
+    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+        torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=20),     # Linear warmup for 10 steps
+        torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
+    ])
+
 
     # TODO: debugging!! try to overfit on a single batch
     # data = next(iter(train_loader))
@@ -65,13 +70,14 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    aug_prob_map = generate_aug_probs([3, 32, 32])
+    c, h, w = 3, 32, 32
+    aug_prob_map = generate_aug_probs([c, h, w])
     model = model.half()
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
     
-    intermediate_cpu = torch.zeros((args.batch_size, 3, 1024, 1024), dtype=torch.float16).pin_memory()
-    intermediate = torch.zeros((args.batch_size, 3 * 1024, 3 * 1024), dtype=torch.float16, device=device)
+    intermediate_cpu = torch.zeros((args.batch_size, c, h * w, h * w), dtype=torch.float16).pin_memory()
+    intermediate = torch.zeros((args.batch_size, c * h * w, c * h * w), dtype=torch.float16, device=device)
     
     top_acc = 0.0
     total_step = 0
@@ -98,8 +104,8 @@ def train(args):
                 intermediate_cpu = calc_aug_var_decomp(img_batch, aug_prob_map)
 
             # intermediate is currently per-channel but needs to be block diagonal instead
-            for idx in range(3):
-                start, end = idx * 1024, (idx + 1) * 1024    
+            for idx in range(c):
+                start, end = idx * h * w, (idx + 1) * h * w    
                 intermediate[:, start:end, start:end] = intermediate_cpu[:, idx]
 
             img_batch = img_batch.half()
@@ -150,6 +156,8 @@ def train(args):
                         vis_dict["std_loss"] = loss_dict["std_loss"]
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]
                         vis_dict["tangent_loss"] = loss_dict["tangent"]
+                        vis_dict["train_jac_norm"] = loss_dict["jac_norm"]
+                        vis_dict["jac_norm_loss"] = loss_dict["jac_norm_loss"]
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5

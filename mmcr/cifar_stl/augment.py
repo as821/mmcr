@@ -231,17 +231,17 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
     # Calculate the mean Frobenius norm of the dot products of the scaled eigenvectors of the augmentation variance matrix with the Jacobian of the model at the given input
 
     def _helper(x):
-        return model(x)[1].squeeze()
+        return F.normalize(model(x)[1].squeeze(), dim=-1)
 
     def _loss_calc(x, var_decomp):
         J = torch.func.jacrev(_helper)(x).flatten(1, -1)
         assert len(J.shape) == 2
-        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro")
+        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), torch.linalg.norm(J)
 
 
     # TODO(as) sketchy... means running stats wont be updated
     model.eval()
-    loss = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
+    loss, jac_norm = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
 
     # J = torch.zeros((inp.shape[0], 16, *inp.shape[1:]), device=inp.device, dtype=inp.dtype)
     # for idx in range(inp.shape[0]):
@@ -249,7 +249,7 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
 
 
     model.train()    
-    return loss.mean()
+    return loss.mean(), jac_norm.mean()
 
 
 
@@ -266,7 +266,10 @@ def vicreg_loss(model, batch):
     batch_sz, num_features = x.shape[0], x.shape[1]
     
     std_x = torch.sqrt(x.var(dim=0) + 0.0001)
-    std_loss = torch.mean(F.relu(1 - std_x)) / 2
+    std_loss = torch.mean(F.relu(1 - std_x))
+    
+    # std_loss = 0.1 / std_x
+    # std_loss = std_loss.mean()
 
     cov_x = (x.T @ x) / (batch_sz - 1)
     cov_loss = off_diagonal(cov_x).pow_(2).sum().div(num_features)
@@ -290,12 +293,14 @@ def loss_function(img_batch, model, intermediate):
     std_loss, cov_loss = vicreg_loss(model, img_batch)
     # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
 
-    tangent_prop = calc_tangent_prop_loss(model, img_batch, intermediate)
-    loss = tangent_prop + 0.1 * std_loss + cov_loss
+    tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
+    jac_norm_loss = 1 / mean_jac_norm
+    loss = tangent_prop + jac_norm_loss
+    # loss = cov_loss + std_loss
 
-    print(f"{tangent_prop} {std_loss} {cov_loss} -> {loss}")
+    print(f"{tangent_prop} {jac_norm_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_norm_loss":jac_norm_loss.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):
@@ -320,8 +325,6 @@ def log_model_jacobian(vis_dict, stats_data, model, device):
 
 
 def calc_aug_var_decomp(img_batch, aug_prob_map):
-    # TODO: this process is incredibly slow, probably just need to pre-compute all these... (maybe we can move this into the dataloader threads??)
-
     with torch.no_grad():
         # calculate augmentation expected value and variance
         aug_ev, aug_var = calc_aug_ev_var(img_batch, aug_prob_map)
