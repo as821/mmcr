@@ -13,7 +13,7 @@ import sys
 import pdb
 
 
-from augmentation import RandomCrop, HorizFlip, Grayscale, ColorJitter
+from  mmcr.cifar_stl.augmentation import RandomCrop, HorizFlip, Grayscale, ColorJitter
 
 
 def generate_aug_probs(img_shape):
