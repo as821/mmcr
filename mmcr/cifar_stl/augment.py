@@ -230,6 +230,7 @@ def calc_model_jac(model, inp):
 def calc_tangent_prop_loss(model, inp, var_decomp):
     # Calculate the mean Frobenius norm of the dot products of the scaled eigenvectors of the augmentation variance matrix with the Jacobian of the model at the given input
 
+    # TODO: maybe functional_call helps?
     def _helper(x):
         return F.normalize(model(x)[1].squeeze(), dim=-1)
 
@@ -288,13 +289,13 @@ def loss_function(img_batch, model, intermediate):
     # global_nuc = torch.linalg.svdvals(F.normalize(out.float(), dim=-1)).sum()     # TODO(as): using this as anti-collapse, do we want to be using L2 vs. L1 here?
 
     # NOTE: if we allow the update of BatchNorm running counts when calc vicreg_loss, loss diverges for some reason...
-    model.eval()
+    # model.eval()
 
     std_loss, cov_loss = vicreg_loss(model, img_batch)
     # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
 
     tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
-    jac_norm_loss = 1 / mean_jac_norm
+    jac_norm_loss = 0.1 / mean_jac_norm
     loss = tangent_prop + jac_norm_loss + std_loss + cov_loss
     # loss = cov_loss + std_loss
 
@@ -335,5 +336,4 @@ def calc_aug_var_decomp(img_batch, aug_prob_map):
         S = torch.sqrt(S)
         
         intermediate = U * S.unsqueeze(-1)
-        intermediate = intermediate.to(torch.float16)
         return intermediate
