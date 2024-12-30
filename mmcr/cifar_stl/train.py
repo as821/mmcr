@@ -56,6 +56,7 @@ def train(args):
     stats_data = stats_tuple[0].flatten(0, 1)
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float32
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr) #, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
@@ -72,12 +73,12 @@ def train(args):
 
     c, h, w = 3, 32, 32
     aug_prob_map = generate_aug_probs([c, h, w])
-    model = model.to(torch.float16)
+    model = model.to(dtype)
     model = model.to(device, non_blocking=True)
     model = torch.compile(model, mode="max-autotune")
     
-    intermediate_cpu = torch.zeros((args.batch_size, c, h * w, h * w), dtype=torch.float16).pin_memory()
-    intermediate = torch.zeros((args.batch_size, c * h * w, c * h * w), dtype=torch.float16, device=device)
+    intermediate_cpu = torch.zeros((args.batch_size, c, h * w, h * w), dtype=dtype).pin_memory()
+    intermediate = torch.zeros((args.batch_size, c * h * w, c * h * w), dtype=dtype, device=device)
     
     top_acc = 0.0
     total_step = 0
@@ -108,7 +109,7 @@ def train(args):
                 start, end = idx * h * w, (idx + 1) * h * w    
                 intermediate[:, start:end, start:end] = intermediate_cpu[:, idx]
 
-            img_batch = img_batch.to(torch.float16)
+            img_batch = img_batch.to(dtype)
             loss, loss_dict = loss_function(img_batch, model, intermediate)
 
 
@@ -122,22 +123,23 @@ def train(args):
                 )
             )
 
-            # backward pass
-            # loss.backward()
-            # optimizer.step()
-            
-            loss = loss.float()
-            scaler.scale(loss).backward()
-            
-            # AMP does not work properly with vamp(jacrev) code for some reason. Still want to scale losses and parameter data/grad need to be in fp32
-            model = model.to(torch.float32)
+            if dtype == torch.float32:
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
+            else:
+                loss = loss.float()
+                scaler.scale(loss).backward()
 
-            scaler.step(optimizer)
-            scaler.update()
-            scheduler.step()
+                # AMP does not work properly with vmap(jacrev) code for some reason. Still want to scale losses and parameter data/grad need to be in fp32
+                model = model.to(torch.float32)
 
-            # return to float16 after the update
-            model = model.to(torch.float16)
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+
+                # return to float16 after the update
+                model = model.to(torch.float16)
 
             if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
@@ -182,7 +184,7 @@ def train(args):
                             model.state_dict(),
                             f"{args.save_folder}/{args.dataset}_{args.n_aug}_{total_step}_acc_{acc_1:0.2f}.pth",
                         )
-                    model = model.to(torch.float16)
+                    # model = model.to(torch.float16)
                 total_loss = 0
             total_step += 1
 
