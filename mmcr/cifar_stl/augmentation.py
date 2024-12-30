@@ -3,6 +3,8 @@ import torchvision
 from tqdm import tqdm
 import einops
 
+import random
+
 import pdb
 
 
@@ -98,8 +100,11 @@ class RandomCrop():
         self.op = torch.block_diag(*[M for _ in range(img_shape[0])])
         self.nstep = n_step
         self.cache = cache_tensor
+        
         self.zf = zoom_factors
-    
+        self.img_shape = self.img_shape
+        self.resize = torchvision.transforms.Resize((self.img_shape[-2], self.img_shape[-1]), interpolation=torchvision.transforms.InterpolationMode.NEAREST_EXACT, max_size=None, antialias=False)
+
 
     def calc_mean_var(self, x):
         """
@@ -138,8 +143,22 @@ class RandomCrop():
 
 
     def generate_random_sample(self, x):
+        assert len(x.shape) == 3
+
         # Randomly sample a zoom factor, then randomly sample a vertical/horizontal translation. Resize and return.
-        pass
+        rand_zf = random.choice(self.zf)
+        h, w = self.img_shape[-2], self.img_shape[-1]
+        zoom_h, zoom_w = int(rand_zf * h), int(rand_zf * w)
+        n_horiz_step = zoom_w - w + 1
+        n_vert_step = zoom_h - h + 1
+        rand_horiz = random.randrange(n_horiz_step)
+        rand_vert = random.randrange(n_vert_step)
+
+        # get crop
+        crop = x[:, rand_vert + zoom_h, rand_horiz + zoom_w]
+        out = self.resize(crop)
+        assert out.shape == self.img_shape
+        return out
 
 
 

@@ -10,7 +10,7 @@ import numpy as np
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.analysis import visualize_augmentations, calc_manifold_subspace_alignment
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, batch_calc_aug_deviation
 from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs, calc_aug_ev_var, calc_aug_var_decomp
 
 
@@ -165,6 +165,10 @@ def train(args):
 
 
                         # TODO(as): log var/cov for output dimensions on test set
+
+                        # calculate augmentation embedding deviation from source image
+                        vis_dict["test_mean_dist"], vis_dict["test_orig_dist"] = batch_calc_aug_deviation(model, stats_tuple[0], aug_prob_map["rc"], device)
+                        vis_dict["train_mean_dist"], vis_dict["train_orig_dist"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
 
                         vis_dict["std_loss"] = loss_dict["std_loss"]
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]

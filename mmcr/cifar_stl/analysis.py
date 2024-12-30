@@ -4,6 +4,7 @@ import wandb
 from tqdm import tqdm
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import pdb
 
 def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_dim=-1):
     prefix = "feat_" if use_feat else "out_"
@@ -92,4 +93,42 @@ def visualize_augmentations(vis_dict, tensor):
     vis_dict["augmentations"] = wandb.Image(plt)
     plt.close()
     return vis_dict
+
+def calc_aug_deviation(model, x, aug, device, naug=100):
+    # Compare embedding of an image to that of its augmentations
+    with torch.no_grad():
+        model = model.to(device)
+        orig_embed = model(x)
+        mean_embed, orig_dist = torch.zeros_like(orig_embed), 0
+        for idx in range(naug):
+            embed = model(aug.generate_random_sample(x).to(device))
+            
+            mean_embed += embed
+            orig_dist += torch.linalg.norm(orig_embed - embed)
+        
+        mean_embed /= naug
+        orig_dist /= naug
+        mean_embed_dist = torch.linalg.norm(orig_embed - mean_embed)
+        
+        # distance of mean embedding from original, mean distance of an embedding from original
+        return mean_embed_dist, orig_dist
+
+def batch_calc_aug_deviation(model, x, aug, device):
+    mean_mean_embed_dist, mean_mean_orig_dist = 0, 0
+    for idx in range(x.shape[0]):
+        e, o = calc_aug_deviation(model, x[idx], aug, device)
+        mean_mean_embed_dist += e
+        mean_mean_orig_dist += o
+    mean_mean_orig_dist /= x.shape[0]
+    mean_mean_embed_dist /= x.shape[0]
+    return mean_mean_embed_dist, mean_mean_orig_dist
+
+
+def output_dim_stats(model, x, device):
+    # Return covariance matrix for the output dimensions of the network
+    embed = model(x.to(device))
+    
+    pdb.set_trace()         # TODO: check cov dimensions
+    return torch.cov(embed)
+
 
