@@ -94,39 +94,42 @@ def visualize_augmentations(vis_dict, tensor):
     plt.close()
     return vis_dict
 
-def calc_aug_deviation(model, x, aug, device, naug=100):
+def batch_calc_aug_deviation(model, x, aug, device, naug=100):
     # Compare embedding of an image to that of its augmentations
-    with torch.no_grad():
-        model = model.to(device)
-        orig_embed = model(x.unsqueeze(0))[1].squeeze()
-        mean_embed, orig_dist = torch.zeros_like(orig_embed), 0
-        
-        augs = torch.zeros((naug, x.shape[0], x.shape[1], x.shape[2]), dtype=x.dtype, device=x.device)
-        for idx in range(naug):
-            augs[idx] = aug.generate_random_sample(x)
-        embed = model(augs)[1]
-        
-        # distance of mean embedding from original, mean distance of an embedding from original
-        orig_dist = torch.linalg.norm(orig_embed - embed, dim=1).mean()
-        mean_embed_dist = torch.linalg.norm(orig_embed - embed.mean(dim=0))
-        return mean_embed_dist, orig_dist
-
-def batch_calc_aug_deviation(model, x, aug, device):
     mean_mean_embed_dist, mean_mean_orig_dist = 0, 0
-    for idx in range(x.shape[0]):
-        e, o = calc_aug_deviation(model, x[idx], aug, device)
-        mean_mean_embed_dist += e
-        mean_mean_orig_dist += o
+    model = model.to(device)
+    x = x.to(device)
+    augs = torch.zeros((naug, x.shape[1], x.shape[2], x.shape[3]), dtype=x.dtype, device=device)
+    orig_embed = model(x)[1]
+
+    for idx in tqdm(range(x.shape[0])):
+        # e, o = calc_aug_deviation(model, x[idx], aug, device)        
+        for jdx in range(naug):
+            augs[jdx] = aug.generate_random_sample(x[idx])
+        embed = model(augs)[1]
+
+        # distance of mean embedding from original, mean distance of an embedding from original
+        mean_mean_embed_dist += torch.linalg.norm(orig_embed[idx] - embed.mean(dim=0))
+        mean_mean_orig_dist += torch.linalg.norm(orig_embed[idx] - embed, dim=1).mean()
+
     mean_mean_orig_dist /= x.shape[0]
     mean_mean_embed_dist /= x.shape[0]
     return mean_mean_embed_dist, mean_mean_orig_dist
 
 
-def output_dim_stats(model, x, device):
-    # Return covariance matrix for the output dimensions of the network
-    embed = model(x.to(device))
-    
-    pdb.set_trace()         # TODO: check cov dimensions
-    return torch.cov(embed)
+def output_dim_stats(model, x, device, vis_dict, name):
+    # log model output dimension variance and covariance
+    cov = torch.cov(model(x.to(device))[1].T).cpu()
+
+    vis_dict[name + "_var_min"] = cov.diag().min()
+    vis_dict[name + "_var_max"] = cov.diag().max()
+
+    plt.figure(figsize=(10,10))
+    plt.imshow(cov, cmap='Blues')
+    plt.colorbar()
+    vis_dict[name + "_cov"] = wandb.Image(plt)
+    plt.close()
+
+    return vis_dict
 
 

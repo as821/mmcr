@@ -148,13 +148,13 @@ def log_model_jacobian(vis_dict, stats_data, model, device):
     jac_norm_sum = 0
     batch_sz = 16
 
-    def helper(model, x):
+    def helper(x):
         return model(x)[1].squeeze()
 
     for start in range(0, stats_data.shape[0], batch_sz):
         end = min(start + batch_sz, stats_data.shape[0])
         btch = stats_data[start : end].unsqueeze(1).to(device)
-        jac = torch.func.vmap(torch.func.jacrev(helper))(model, btch).flatten(1, -1)
+        jac = torch.func.vmap(torch.func.jacrev(helper))(btch).flatten(1, -1)
         jac_norm_sum += torch.linalg.norm(jac, dim=1).sum()
 
     # mean of per-sample Jacobian norms

@@ -10,7 +10,7 @@ import numpy as np
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, batch_calc_aug_deviation
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, batch_calc_aug_deviation, output_dim_stats
 from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs, calc_aug_ev_var, calc_aug_var_decomp
 
 
@@ -141,10 +141,12 @@ def train(args):
                 # return to float16 after the update
                 model = model.to(torch.float16)
 
-            # model.eval()
-            # mean_dist, orig_dist = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
-            # print(f"\t{mean_dist} {orig_dist}")
-            # model.train()
+            # with torch.no_grad():
+            #     model.eval()
+            #     mean_dist, orig_dist = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
+            #     print(f"\t{mean_dist} {orig_dist}")
+            #     output_dim_stats(model, img_batch, device, {}, "foo")
+            #     model.train()
 
             if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
@@ -168,11 +170,12 @@ def train(args):
                         # track norm of the model Jacobian (across augmentations of the test set) to detect collapse
                         vis_dict = log_model_jacobian(vis_dict, stats_data, model, device)
 
-
-                        # TODO(as): log var/cov for output dimensions on test set
+                        # log output dimension var/cov
+                        vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out")
+                        vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out")
 
                         # calculate augmentation embedding deviation from source image
-                        vis_dict["test_mean_dist"], vis_dict["test_orig_dist"] = batch_calc_aug_deviation(model, stats_tuple[0], aug_prob_map["rc"], device)
+                        vis_dict["test_mean_dist"], vis_dict["test_orig_dist"] = batch_calc_aug_deviation(model, stats_data, aug_prob_map["rc"], device)
                         vis_dict["train_mean_dist"], vis_dict["train_orig_dist"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
 
                         vis_dict["std_loss"] = loss_dict["std_loss"]
