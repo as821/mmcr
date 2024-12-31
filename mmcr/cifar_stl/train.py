@@ -141,6 +141,11 @@ def train(args):
                 # return to float16 after the update
                 model = model.to(torch.float16)
 
+            # model.eval()
+            # mean_dist, orig_dist = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
+            # print(f"\t{mean_dist} {orig_dist}")
+            # model.train()
+
             if total_step % args.log_freq == 0 and total_step != 0:
                 with torch.no_grad():
                     model.eval()

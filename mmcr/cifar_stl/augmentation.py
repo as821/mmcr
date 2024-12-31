@@ -102,7 +102,7 @@ class RandomCrop():
         self.cache = cache_tensor
         
         self.zf = zoom_factors
-        self.img_shape = self.img_shape
+        self.img_shape = img_shape
         self.resize = torchvision.transforms.Resize((self.img_shape[-2], self.img_shape[-1]), interpolation=torchvision.transforms.InterpolationMode.NEAREST_EXACT, max_size=None, antialias=False)
 
 
@@ -155,9 +155,14 @@ class RandomCrop():
         rand_vert = random.randrange(n_vert_step)
 
         # get crop
-        crop = x[:, rand_vert + zoom_h, rand_horiz + zoom_w]
+        vert = int(rand_vert / rand_zf)
+        vert_end = int((rand_vert + h) / rand_zf)
+        horiz = int(rand_horiz / rand_zf)
+        horiz_end = int((rand_horiz + w) / rand_zf)
+        crop = x[:, vert : vert_end, horiz : horiz_end]
         out = self.resize(crop)
-        assert out.shape == self.img_shape
+
+        assert list(out.shape) == self.img_shape
         return out
 
 

@@ -98,19 +98,17 @@ def calc_aug_deviation(model, x, aug, device, naug=100):
     # Compare embedding of an image to that of its augmentations
     with torch.no_grad():
         model = model.to(device)
-        orig_embed = model(x)
+        orig_embed = model(x.unsqueeze(0))[1].squeeze()
         mean_embed, orig_dist = torch.zeros_like(orig_embed), 0
-        for idx in range(naug):
-            embed = model(aug.generate_random_sample(x).to(device))
-            
-            mean_embed += embed
-            orig_dist += torch.linalg.norm(orig_embed - embed)
         
-        mean_embed /= naug
-        orig_dist /= naug
-        mean_embed_dist = torch.linalg.norm(orig_embed - mean_embed)
+        augs = torch.zeros((naug, x.shape[0], x.shape[1], x.shape[2]), dtype=x.dtype, device=x.device)
+        for idx in range(naug):
+            augs[idx] = aug.generate_random_sample(x)
+        embed = model(augs)[1]
         
         # distance of mean embedding from original, mean distance of an embedding from original
+        orig_dist = torch.linalg.norm(orig_embed - embed, dim=1).mean()
+        mean_embed_dist = torch.linalg.norm(orig_embed - embed.mean(dim=0))
         return mean_embed_dist, orig_dist
 
 def batch_calc_aug_deviation(model, x, aug, device):
