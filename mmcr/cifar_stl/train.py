@@ -69,7 +69,7 @@ def train(args):
     # data = next(iter(train_loader))
     
     if args.wandb:
-        wandb.watch(model, log_freq=10)
+        wandb.watch(model, log_freq=1)
 
     c, h, w = 3, 32, 32
     aug_prob_map = generate_aug_probs([c, h, w])
@@ -182,7 +182,7 @@ def train(args):
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]
                         vis_dict["tangent_loss"] = loss_dict["tangent"]
                         vis_dict["train_jac_norm"] = loss_dict["jac_norm"]
-                        vis_dict["jac_norm_loss"] = loss_dict["jac_norm_loss"]
+                        # vis_dict["jac_norm_loss"] = loss_dict["jac_norm_loss"]
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5

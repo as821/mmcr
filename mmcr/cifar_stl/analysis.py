@@ -19,7 +19,7 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_
             feat, out = model(data[idx].cuda(non_blocking=True))
             if not use_feat:
                 feat = out
-                feat = F.normalize(feat, dim=-1)
+            feat = F.normalize(feat, dim=-1)
 
             # calculate the centroid of this image manifold
             centroid = feat.mean(dim=0)
@@ -100,13 +100,13 @@ def batch_calc_aug_deviation(model, x, aug, device, naug=100):
     model = model.to(device)
     x = x.to(device)
     augs = torch.zeros((naug, x.shape[1], x.shape[2], x.shape[3]), dtype=x.dtype, device=device)
-    orig_embed = model(x)[1]
+    orig_embed = F.normalize(model(x)[1], dim=-1)
 
     for idx in tqdm(range(x.shape[0])):
         # e, o = calc_aug_deviation(model, x[idx], aug, device)        
         for jdx in range(naug):
             augs[jdx] = aug.generate_random_sample(x[idx])
-        embed = model(augs)[1]
+        embed = F.normalize(model(augs)[1], dim=-1)
 
         # distance of mean embedding from original, mean distance of an embedding from original
         mean_mean_embed_dist += torch.linalg.norm(orig_embed[idx] - embed.mean(dim=0))
@@ -119,7 +119,7 @@ def batch_calc_aug_deviation(model, x, aug, device, naug=100):
 
 def output_dim_stats(model, x, device, vis_dict, name):
     # log model output dimension variance and covariance
-    cov = torch.cov(model(x.to(device))[1].T).cpu()
+    cov = torch.cov(F.normalize(model(x.to(device))[1], dim=-1).T).cpu()
 
     vis_dict[name + "_var_min"] = cov.diag().min()
     vis_dict[name + "_var_max"] = cov.diag().max()

@@ -72,7 +72,8 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
 
     # TODO: maybe functional_call helps?
     def _helper(x):
-        return F.normalize(model(x)[1].squeeze(), dim=-1)
+        # return F.normalize(model(x)[1].squeeze(), dim=-1)
+        return model(x)[1].squeeze()
 
     def _loss_calc(x, var_decomp):
         J = torch.func.jacrev(_helper)(x).flatten(1, -1)
@@ -102,18 +103,23 @@ def off_diagonal(x):
 
 def vicreg_loss(model, batch):
     # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L202
-    x = F.normalize(model(batch)[1])
+    x = model(batch)[1]
     x = x - x.mean(dim=0)
     batch_sz, num_features = x.shape[0], x.shape[1]
     
-    std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+    std_x = torch.sqrt(x.var(dim=0) + 1e-8)
     std_loss = torch.mean(F.relu(1 - std_x))
-    
+
     # std_loss = 0.1 / std_x
     # std_loss = std_loss.mean()
 
     cov_x = (x.T @ x) / (batch_sz - 1)
-    cov_loss = off_diagonal(cov_x).pow_(2).sum().div(num_features)
+    cov_x = off_diagonal(cov_x)
+    cov_loss = cov_x.pow_(2).sum().div(num_features)
+    
+    print(f"\t{std_x.max()} {std_x.min()} ({cov_x.max()} {cov_x.min()})")
+    print(f"\t{x.max(dim=0).values.cpu().detach().numpy()} \n\t{x.min(dim=0).values.cpu().detach().numpy()}")
+    
     return std_loss, cov_loss
 
 
@@ -135,13 +141,12 @@ def loss_function(img_batch, model, intermediate):
     # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
 
     tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
-    jac_norm_loss = 0.1 / mean_jac_norm
-    loss = tangent_prop + jac_norm_loss + std_loss + cov_loss
-    # loss = cov_loss + std_loss
+    loss = std_loss + cov_loss + tangent_prop
+    # tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
 
-    print(f"{tangent_prop} {jac_norm_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
+    print(f"{tangent_prop} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_norm_loss":jac_norm_loss.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):
@@ -149,6 +154,7 @@ def log_model_jacobian(vis_dict, stats_data, model, device):
     batch_sz = 16
 
     def helper(x):
+        # F.normalize(model(x)[1].squeeze(), dim=-1)
         return model(x)[1].squeeze()
 
     for start in range(0, stats_data.shape[0], batch_sz):
