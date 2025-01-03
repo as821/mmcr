@@ -173,10 +173,17 @@ def train(args):
                         # log output dimension var/cov
                         vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out")
                         vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out")
+                        vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out_norm", normalize=True)
+                        vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out_norm", normalize=True)
+
 
                         # calculate augmentation embedding deviation from source image
                         vis_dict["test_mean_dist"], vis_dict["test_orig_dist"] = batch_calc_aug_deviation(model, stats_data, aug_prob_map["rc"], device)
                         vis_dict["train_mean_dist"], vis_dict["train_orig_dist"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
+                        
+                        vis_dict["test_mean_dist_norm"], vis_dict["test_orig_dist_norm"] = batch_calc_aug_deviation(model, stats_data, aug_prob_map["rc"], device, normalize=True)
+                        vis_dict["train_mean_dist_norm"], vis_dict["train_orig_dist_norm"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device, normalize=True)
+
 
                         vis_dict["std_loss"] = loss_dict["std_loss"]
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]

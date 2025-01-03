@@ -94,19 +94,28 @@ def visualize_augmentations(vis_dict, tensor):
     plt.close()
     return vis_dict
 
-def batch_calc_aug_deviation(model, x, aug, device, naug=100):
+def batch_calc_aug_deviation(model, x, aug, device, naug=100, normalize=False):
     # Compare embedding of an image to that of its augmentations
     mean_mean_embed_dist, mean_mean_orig_dist = 0, 0
     model = model.to(device)
     x = x.to(device)
     augs = torch.zeros((naug, x.shape[1], x.shape[2], x.shape[3]), dtype=x.dtype, device=device)
-    orig_embed = F.normalize(model(x)[1], dim=-1)
+    
+    if normalize:
+        orig_embed = F.normalize(model(x)[1], dim=-1)
+    else:
+        orig_embed = model(x)[1]
+
 
     for idx in tqdm(range(x.shape[0])):
         # e, o = calc_aug_deviation(model, x[idx], aug, device)        
         for jdx in range(naug):
             augs[jdx] = aug.generate_random_sample(x[idx])
-        embed = F.normalize(model(augs)[1], dim=-1)
+        
+        if normalize:
+            embed = F.normalize(model(augs)[1], dim=-1)
+        else:
+            embed = model(augs)[1]
 
         # distance of mean embedding from original, mean distance of an embedding from original
         mean_mean_embed_dist += torch.linalg.norm(orig_embed[idx] - embed.mean(dim=0))
@@ -117,9 +126,12 @@ def batch_calc_aug_deviation(model, x, aug, device, naug=100):
     return mean_mean_embed_dist, mean_mean_orig_dist
 
 
-def output_dim_stats(model, x, device, vis_dict, name):
+def output_dim_stats(model, x, device, vis_dict, name, normalize=False):
     # log model output dimension variance and covariance
-    cov = torch.cov(F.normalize(model(x.to(device))[1], dim=-1).T).cpu()
+    res = model(x.to(device))[1]
+    if normalize:
+        res = F.normalize(res, dim=-1)
+    cov = torch.cov(res.T).cpu()
 
     vis_dict[name + "_var_min"] = cov.diag().min()
     vis_dict[name + "_var_max"] = cov.diag().max()
