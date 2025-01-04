@@ -14,6 +14,7 @@ def test_one_epoch(
     test_data_loader: DataLoader,
     temperature: float = 0.5,
     k: int = 200,
+    feat: bool = False
 ):
     net.eval()
     total_top1, total_top5, total_num, feature_bank, target_bank = 0.0, 0.0, 0, [], []
@@ -22,7 +23,10 @@ def test_one_epoch(
         for data_tuple in tqdm(memory_data_loader):
             data, target = data_tuple
             target_bank.append(target)
-            _, out = net(data.cuda(non_blocking=True))
+            if feat:
+                out, _ = net(data.cuda(non_blocking=True))
+            else:
+                _, out = net(data.cuda(non_blocking=True))
             feature = F.normalize(out, dim=-1)
             feature_bank.append(feature)
         # [D, N]
@@ -36,7 +40,10 @@ def test_one_epoch(
         for data_tuple in test_bar:
             data, target = data_tuple
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
-            _, out = net(data)
+            if feat:
+                out, _ = net(data)
+            else:
+                _, out = net(data)
             feature = F.normalize(out, dim=-1)
 
             total_num += data.size(0)

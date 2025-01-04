@@ -152,11 +152,7 @@ def train(args):
                 with torch.no_grad():
                     model.eval()
                     model = model.float()
-                    acc_1, acc_5 = test_one_epoch(
-                        model,
-                        memory_loader,
-                        test_loader,
-                    )
+                    acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
                     if acc_1 > top_acc:
                         top_acc = acc_1
 
@@ -184,6 +180,9 @@ def train(args):
                         vis_dict["test_mean_dist_norm"], vis_dict["test_orig_dist_norm"] = batch_calc_aug_deviation(model, stats_data, aug_prob_map["rc"], device, normalize=True)
                         vis_dict["train_mean_dist_norm"], vis_dict["train_orig_dist_norm"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device, normalize=True)
 
+                        
+                        feat_acc_1, feat_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=True)
+
 
                         vis_dict["std_loss"] = loss_dict["std_loss"]
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]
@@ -193,6 +192,8 @@ def train(args):
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
+                        vis_dict["val_acc_1_feat"] = feat_acc_1
+                        vis_dict["val_acc_5_feat"] = feat_acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
                         wandb.log(vis_dict, step=total_step)
                         model.train()

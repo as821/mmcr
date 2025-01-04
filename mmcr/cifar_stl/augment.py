@@ -78,7 +78,12 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
     def _loss_calc(x, var_decomp):
         J = torch.func.jacrev(_helper)(x).flatten(1, -1)
         assert len(J.shape) == 2
-        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), torch.linalg.norm(J)
+        norm = torch.linalg.norm(J)
+
+        # NOTE: removes dependence of this loss on the Jacobian norm (removes the degenerate solution of minimizing the Jacobian norm). This makes the minimization of the anti-collapse loss work better
+        J = F.normalize(J, dim=-1)
+        
+        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), norm
 
 
     # TODO(as) sketchy... means running stats wont be updated
@@ -108,11 +113,7 @@ def vicreg_loss(model, batch):
     batch_sz, num_features = x.shape[0], x.shape[1]
     
     std_x = torch.sqrt(x.var(dim=0) + 1e-8)
-    # std_loss = torch.mean(F.relu(1 - std_x))
-    std_loss = torch.mean(1 / std_x)
-
-    # std_loss = 0.1 / std_x
-    # std_loss = std_loss.mean()
+    std_loss = torch.mean(F.relu(1 - std_x))
 
     cov_x = (x.T @ x) / (batch_sz - 1)
     cov_x = off_diagonal(cov_x)
