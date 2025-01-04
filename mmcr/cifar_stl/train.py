@@ -10,7 +10,7 @@ import numpy as np
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, batch_calc_aug_deviation, output_dim_stats
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, batch_calc_aug_deviation, output_dim_stats, calc_aug_deviation_jacobian
 from mmcr.cifar_stl.augment import loss_function, log_model_jacobian, generate_aug_probs, calc_aug_ev_var, calc_aug_var_decomp
 
 
@@ -79,7 +79,7 @@ def train(args):
     
     intermediate_cpu = torch.zeros((args.batch_size, c, h * w, h * w), dtype=dtype).pin_memory()
     intermediate = torch.zeros((args.batch_size, c * h * w, c * h * w), dtype=dtype, device=device)
-    
+
     top_acc = 0.0
     total_step = 0
     total_loss = 0.0
@@ -104,6 +104,8 @@ def train(args):
                 img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").to(device, non_blocking=True)
                 intermediate_cpu = calc_aug_var_decomp(img_batch, aug_prob_map)
 
+            # TODO: this is stupid and unnecessary, remove this requirement
+
             # intermediate is currently per-channel but needs to be block diagonal instead
             for idx in range(c):
                 start, end = idx * h * w, (idx + 1) * h * w    
@@ -111,8 +113,6 @@ def train(args):
 
             img_batch = img_batch.to(dtype)
             loss, loss_dict = loss_function(img_batch, model, intermediate)
-
-
 
             # update the training bar
             total_num += data_tuple[0].size(0)
@@ -143,6 +143,9 @@ def train(args):
 
             # with torch.no_grad():
             #     model.eval()
+            #     mean_dist, mean_norm = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=False)
+            #     mean_dist_norm, mean_norm_norm = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=True)
+            #     print(f"\n\n{mean_dist_norm} {mean_norm_norm}\n")
             #     mean_dist, orig_dist = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
             #     print(f"\t{mean_dist} {orig_dist}")
             #     output_dim_stats(model, img_batch, device, {}, "foo")
@@ -180,7 +183,10 @@ def train(args):
                         vis_dict["test_mean_dist_norm"], vis_dict["test_orig_dist_norm"] = batch_calc_aug_deviation(model, stats_data, aug_prob_map["rc"], device, normalize=True)
                         vis_dict["train_mean_dist_norm"], vis_dict["train_orig_dist_norm"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device, normalize=True)
 
-                        
+                        # calculate augmentation Jacobian embedding deviation (distance from original image embedding, norm of "Jac.norm() @ aug.T")
+                        _, vis_dict["train_jac_aug_emb_norm"] = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=True)
+                        _, vis_dict["test_jac_aug_emb_norm"] = calc_aug_deviation_jacobian(model, stats_data, aug_prob_map["rc"], device, jac_norm=True)
+
                         feat_acc_1, feat_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=True)
 
 

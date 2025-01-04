@@ -99,6 +99,35 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
     return loss.mean(), jac_norm.mean()
 
 
+def sampling_tangent_prop_loss(model, x, aug, naug=1000):
+    # Sampling version of the tangent prop loss to act as a sanity check when debugging possible variance matrix/Jac bugs
+    model.eval()
+
+    def helper(x):
+        return model(x)[1].squeeze()
+
+    loss = torch.tensor(0., device=x.device, requires_grad=True)
+    norm = torch.tensor(0., device=x.device)
+    
+    for idx in range(x.shape[0]):
+        # calculate Jacobian at x[idx]
+        inp = x[idx]
+        jac = torch.func.jacrev(helper)(inp.unsqueeze(0)).flatten(1, -1)
+
+        with torch.no_grad():
+            norm += torch.linalg.norm(jac)
+            augs = torch.zeros((naug, x.shape[1] * x.shape[2] * x.shape[3]), dtype=x.dtype, device=x.device)
+            for jdx in range(naug):
+                augs[jdx] = aug.generate_random_sample(inp).flatten()
+        
+        embed = F.normalize(jac, dim=-1) @ augs.T
+        loss = loss + torch.linalg.norm(embed, dim=0).sum()
+
+    loss = loss / (x.shape[0] * naug)
+    norm /= x.shape[0]
+    model.train()
+    return loss, norm
+
 
 def off_diagonal(x):
     n, m = x.shape

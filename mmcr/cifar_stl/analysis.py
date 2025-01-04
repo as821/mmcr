@@ -126,6 +126,39 @@ def batch_calc_aug_deviation(model, x, aug, device, naug=100, normalize=False):
     return mean_mean_embed_dist, mean_mean_orig_dist
 
 
+def calc_aug_deviation_jacobian(model, x, aug, device, naug=1000, jac_norm=False):
+    # Check deviation of Jacobian embedding of a random augmentation vs. that of the original image
+    # This should be zero if the Jacobian invariance loss and augmentation variance calc are minimized and working properly
+    # (possibly normalized to be invariant to the Jacobian norm. invariance loss can be almost perfectly minimized but if has very high norm this metric will still rise)
+    
+    model = model.to(device)
+    x = x.to(device)
+    augs = torch.zeros((naug, x.shape[1] * x.shape[2] * x.shape[3]), dtype=x.dtype, device=device)
+    orig_embed = model(x)[1]
+
+    def helper(x):
+        return model(x)[1].squeeze()
+        
+    mean_dist, mean_norm = 0, 0
+    for idx in tqdm(range(x.shape[0])):
+        # calculate Jacobian at x[idx]
+        jac = torch.func.jacrev(helper)(x[idx].unsqueeze(0)).flatten(1, -1)
+        for jdx in range(naug):
+            augs[jdx] = aug.generate_random_sample(x[idx]).flatten()
+        
+        if jac_norm:
+            jac = F.normalize(jac, dim=-1)
+
+        # calculate the distance of the Jacobian embedding of the augmentations
+        embed = jac @ augs.T
+        dist = embed - orig_embed[idx].unsqueeze(-1)
+        mean_dist += torch.linalg.norm(dist, dim=0).sum()
+        mean_norm += torch.linalg.norm(embed, dim=0).sum()
+    
+    mean_dist /= (x.shape[0] * naug) 
+    mean_norm /= (x.shape[0] * naug) 
+    return mean_dist, mean_norm
+
 def output_dim_stats(model, x, device, vis_dict, name, normalize=False):
     # log model output dimension variance and covariance
     res = model(x.to(device))[1]
