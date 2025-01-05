@@ -144,7 +144,7 @@ def train(args):
             # with torch.no_grad():
             #     model.eval()
             #     mean_dist, mean_norm = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=False)
-            #     mean_dist_norm, mean_norm_norm = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=True)
+            #     mean_norm_norm = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=True)
             #     print(f"\n\n{mean_dist_norm} {mean_norm_norm}\n")
             #     mean_dist, orig_dist = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device)
             #     print(f"\t{mean_dist} {orig_dist}")
@@ -184,8 +184,8 @@ def train(args):
                         vis_dict["train_mean_dist_norm"], vis_dict["train_orig_dist_norm"] = batch_calc_aug_deviation(model, img_batch, aug_prob_map["rc"], device, normalize=True)
 
                         # calculate augmentation Jacobian embedding deviation (distance from original image embedding, norm of "Jac.norm() @ aug.T")
-                        _, vis_dict["train_jac_aug_emb_norm"] = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=True)
-                        _, vis_dict["test_jac_aug_emb_norm"] = calc_aug_deviation_jacobian(model, stats_data, aug_prob_map["rc"], device, jac_norm=True)
+                        vis_dict["train_jac_aug_emb_norm"] = calc_aug_deviation_jacobian(model, img_batch, aug_prob_map["rc"], device, jac_norm=True, aug_norm=True)
+                        vis_dict["test_jac_aug_emb_norm"] = calc_aug_deviation_jacobian(model, stats_data[:100], aug_prob_map["rc"], device, jac_norm=True, aug_norm=True)
 
                         feat_acc_1, feat_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=True)
 

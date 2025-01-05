@@ -174,7 +174,8 @@ def loss_function(img_batch, model, intermediate):
     # tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
 
     tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
-    loss = std_loss + cov_loss + tangent_prop
+    cov_loss *= 0.1
+    loss = tangent_prop + std_loss + cov_loss
 
     print(f"{tangent_prop} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
