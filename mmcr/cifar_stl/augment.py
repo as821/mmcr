@@ -81,7 +81,7 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
         norm = torch.linalg.norm(J)
 
         # Norm of the Jacobian in the direction of the augmentation variance (norm of the projection of the Jacobian onto each scaled aug variance e'vec)
-        J_aug_norm = J @ (var_decomp / torch.linalg.norm(var_decomp, dim=1).unsqueeze(0))
+        J_aug_norm = J @ (var_decomp / (torch.linalg.norm(var_decomp, dim=1).unsqueeze(0) + 1e-4))
 
         # NOTE: removes dependence of this loss on the Jacobian norm (removes the degenerate solution of minimizing the Jacobian norm). This makes the minimization of the anti-collapse loss work better
         J = F.normalize(J, dim=-1)
