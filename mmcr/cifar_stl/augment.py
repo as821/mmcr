@@ -81,7 +81,7 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
         norm = torch.linalg.norm(J)
 
         # Norm of the Jacobian in the direction of the augmentation variance (norm of the projection of the Jacobian onto each scaled aug variance e'vec)
-        J_aug_norm = (J @ var_decomp) / torch.linalg.norm(var_decomp, dim=1).unsqueeze(0)
+        J_aug_norm = J @ (var_decomp / torch.linalg.norm(var_decomp, dim=1).unsqueeze(0))
 
         # NOTE: removes dependence of this loss on the Jacobian norm (removes the degenerate solution of minimizing the Jacobian norm). This makes the minimization of the anti-collapse loss work better
         J = F.normalize(J, dim=-1)
@@ -97,10 +97,8 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
     # for idx in range(inp.shape[0]):
     #     J[idx] = torch.func.jacrev(helper)(inp[idx])
 
-    pdb.set_trace()
-
     model.train()    
-    return loss.mean(), jac_norm.mean(), jac_aug_norm.mean()
+    return loss.mean(), jac_norm.mean(), jac_aug_norm
 
 
 def sampling_tangent_prop_loss(model, x, aug, naug=1000):
@@ -179,9 +177,14 @@ def loss_function(img_batch, model, intermediate):
 
     tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
     cov_loss *= 0.1
+
+    pdb.set_trace()
+
+    jac_aug_norm_loss = mean_jac_aug_norm.pow_(2).mean()
+
     loss = tangent_prop + std_loss + cov_loss
 
-    print(f"{tangent_prop} ({mean_jac_norm} {mean_jac_aug_norm} {std_loss} {cov_loss}) -> {loss}")
+    print(f"{tangent_prop}, {jac_aug_norm_loss} ({mean_jac_norm} {mean_jac_aug_norm} {std_loss} {cov_loss}) -> {loss}")
 
     return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_aug_norm":mean_jac_aug_norm.item()}
 
