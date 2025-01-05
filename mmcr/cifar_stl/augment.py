@@ -80,23 +80,27 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
         assert len(J.shape) == 2
         norm = torch.linalg.norm(J)
 
+        # Norm of the Jacobian in the direction of the augmentation variance (norm of the projection of the Jacobian onto each scaled aug variance e'vec)
+        J_aug_norm = (J @ var_decomp) / torch.linalg.norm(var_decomp, dim=1).unsqueeze(0)
+
         # NOTE: removes dependence of this loss on the Jacobian norm (removes the degenerate solution of minimizing the Jacobian norm). This makes the minimization of the anti-collapse loss work better
         J = F.normalize(J, dim=-1)
         
-        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), norm
+        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), norm, J_aug_norm
 
 
     # TODO(as) sketchy... means running stats wont be updated
     model.eval()
-    loss, jac_norm = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
+    loss, jac_norm, jac_aug_norm = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
 
     # J = torch.zeros((inp.shape[0], 16, *inp.shape[1:]), device=inp.device, dtype=inp.dtype)
     # for idx in range(inp.shape[0]):
     #     J[idx] = torch.func.jacrev(helper)(inp[idx])
 
+    pdb.set_trace()
 
     model.train()    
-    return loss.mean(), jac_norm.mean()
+    return loss.mean(), jac_norm.mean(), jac_aug_norm.mean()
 
 
 def sampling_tangent_prop_loss(model, x, aug, naug=1000):
@@ -173,13 +177,13 @@ def loss_function(img_batch, model, intermediate):
     # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
     # tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
 
-    tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
+    tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
     cov_loss *= 0.1
     loss = tangent_prop + std_loss + cov_loss
 
-    print(f"{tangent_prop} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
+    print(f"{tangent_prop} ({mean_jac_norm} {mean_jac_aug_norm} {std_loss} {cov_loss}) -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_aug_norm":mean_jac_aug_norm.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):
