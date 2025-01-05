@@ -178,7 +178,7 @@ def loss_function(img_batch, model, intermediate):
     tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
     cov_loss *= 0.1
 
-    pdb.set_trace()
+    # pdb.set_trace()
 
     jac_aug_norm_loss = mean_jac_aug_norm.pow_(2).mean()
 
