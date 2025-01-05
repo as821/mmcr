@@ -186,7 +186,7 @@ def loss_function(img_batch, model, intermediate):
 
     print(f"{tangent_prop}, {jac_aug_norm_loss} ({mean_jac_norm} {mean_jac_aug_norm} {std_loss} {cov_loss}) -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_aug_norm":mean_jac_aug_norm.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_aug_norm_loss":jac_aug_norm_loss.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):

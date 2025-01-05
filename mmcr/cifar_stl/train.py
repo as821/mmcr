@@ -194,7 +194,7 @@ def train(args):
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]
                         vis_dict["tangent_loss"] = loss_dict["tangent"]
                         vis_dict["train_jac_norm"] = loss_dict["jac_norm"]
-                        vis_dict["jac_aug_norm"] = loss_dict["jac_aug_norm"]
+                        vis_dict["jac_aug_norm_loss"] = loss_dict["jac_aug_norm_loss"]
                         # vis_dict["jac_norm_loss"] = loss_dict["jac_norm_loss"]
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
