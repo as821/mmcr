@@ -180,9 +180,9 @@ def loss_function(img_batch, model, intermediate):
 
     # pdb.set_trace()
 
-    jac_aug_norm_loss = mean_jac_aug_norm.pow_(2).mean()
+    jac_aug_norm_loss = mean_jac_aug_norm.abs().mean()
 
-    loss = tangent_prop + std_loss + cov_loss
+    loss = tangent_prop + std_loss + cov_loss + jac_aug_norm_loss
 
     print(f"{tangent_prop}, {jac_aug_norm_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
