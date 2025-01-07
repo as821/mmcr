@@ -101,6 +101,66 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
     return loss.mean(), jac_norm.mean(), jac_aug_norm
 
 
+
+def _finite_difference_jacobian(f, x, epsilon=1e-7):
+    """
+    Compute finite difference approximation of the Jacobian matrix for function f: R^n -> R^m
+    
+    Args:
+        f (callable): Function that takes numpy array of shape (n,) and returns array of shape (m,)
+        x (np.ndarray): Point at which to evaluate Jacobian, shape (n,)
+        epsilon (float): Small perturbation value for finite differences
+    
+    Returns:
+        np.ndarray: Jacobian matrix of shape (m, n)
+    """
+    n = x.shape[0]
+    f_x = f(x)
+    m = f_x.shape[0]
+    
+    J = torch.zeros((m, n), device=x.device)
+    
+    # Compute each partial derivative between each output dimension (M) and each input dimension (N)
+    for i in tqdm(range(m)):
+        # Create basis vector for this output dimension
+        e_i = torch.zeros((m,), device=x.device)
+        e_i[i] = 1.0
+        
+        def directional_derivative(x_perturbed):
+            return torch.dot(e_i, f(x_perturbed) - f_x)
+        
+        # Compute partial derivatives for this output dimension
+        for j in range(n):
+            x_plus = x.copy()
+            x_plus[j] += epsilon
+            
+            # Forward difference approximation
+            J[i, j] = directional_derivative(x_plus) / epsilon
+    
+    return J
+
+
+def calc_aug_evec_loss(model, x, var_decomp):
+    # Penalize the difference between the embedding of the eigenvectors of the augmentation variance matrix and the embedding of the original image
+
+    # var_decomp are the e'vec of the 
+
+
+
+    def _helper(x):
+        # return F.normalize(model(x)[1].squeeze(), dim=-1)
+        return model(x)[1].squeeze()
+
+    with torch.no_grad():
+        J_autodiff = torch.func.jacrev(_helper)(x[0]).flatten(1, -1)
+
+        J_finite = _finite_difference_jacobian(model, x)
+
+    pdb.set_trace()
+
+
+
+
 def sampling_tangent_prop_loss(model, x, aug, naug=1000):
     # Sampling version of the tangent prop loss to act as a sanity check when debugging possible variance matrix/Jac bugs
     model.eval()
