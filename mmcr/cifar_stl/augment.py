@@ -102,62 +102,105 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
 
 
 
-def _finite_difference_jacobian(f, x, epsilon=1e-7):
+def _finite_difference_jacobian(f, x, eps=1e-2, dtype=torch.float32):
     """
     Compute finite difference approximation of the Jacobian matrix for function f: R^n -> R^m
     
-    Args:
-        f (callable): Function that takes numpy array of shape (n,) and returns array of shape (m,)
-        x (np.ndarray): Point at which to evaluate Jacobian, shape (n,)
-        epsilon (float): Small perturbation value for finite differences
+    f (callable): Function that takes numpy array of shape (n,) and returns array of shape (m,)
+    x (np.ndarray): Point at which to evaluate Jacobian, shape (n,)
+    eps (float): Small perturbation value for finite differences
     
-    Returns:
-        np.ndarray: Jacobian matrix of shape (m, n)
+    NOTE: must convert f and x to double precision in order to get results similar to autodiff (finite difference solution approaches analytical derivatives in the limit of eps)
     """
-    n = x.shape[0]
-    f_x = f(x)
-    m = f_x.shape[0]
-    
-    J = torch.zeros((m, n), device=x.device)
-    
+    f = f.to(dtype)
+    x = x.to(dtype)
+
+    orig_shape = x.shape
+    f_x = f(x)[1]
+    m = f_x.shape[1]
+
+    x = x.flatten(1, -1)
+    b, n = x.shape[0], x.shape[1]
+        
+    # basis vector for each output dimension
+    I = torch.eye(m, device=x.device, dtype=dtype)
+
     # Compute each partial derivative between each output dimension (M) and each input dimension (N)
-    for i in tqdm(range(m)):
-        # Create basis vector for this output dimension
-        e_i = torch.zeros((m,), device=x.device)
-        e_i[i] = 1.0
+    J = torch.zeros((b, m, n), device=x.device, dtype=dtype)
+    for j in tqdm(range(n)):
+        x_plus = x.clone()
+
+        # TODO: this is stupid, figure out how to do this with views + remove flatten/reshaping
+        x_plus[:, j] += eps
+        x_plus = einops.rearrange(x_plus, "B (X Y Z) -> B X Y Z", X=orig_shape[1], Y=orig_shape[2])
+
+        diff = f(x_plus)[1] - f_x
         
-        def directional_derivative(x_perturbed):
-            return torch.dot(e_i, f(x_perturbed) - f_x)
-        
-        # Compute partial derivatives for this output dimension
-        for j in range(n):
-            x_plus = x.copy()
-            x_plus[j] += epsilon
-            
-            # Forward difference approximation
-            J[i, j] = directional_derivative(x_plus) / epsilon
-    
+        # dot product with each output dimension basis vector. finite different approximation to the partial derivative
+        # J[:, :, j] = (diff @ I) / eps
+        J[:, :, j] = diff
+    J /= eps
     return J
+
+def _finite_diff_aug_var_jac(f, x, direction):
+    # NOTE: calculate the angle between augmentation variance e'vec and the normalized Jacobian
+
+    orig_shape = x.shape
+    f_x = f(x)[1]
+    m = f_x.shape[1]
+    
+    # NOTE: only keep e'vec with largest e'val
+    direction = direction[:, -32:]
+    
+    # basis vector for each output dimension
+    b, n = direction.shape[0], direction.shape[1]
+    I = torch.eye(m, device=x.device, dtype=x.dtype).unsqueeze(0)
+
+    # e'vec are in the final dimension of direction
+    norms = torch.linalg.norm(direction - x.flatten(1, -1).unsqueeze(1), dim=-1).unsqueeze(-1)
+    direction = einops.rearrange(direction, "B C (X Y Z) -> (B C) X Y Z", X=orig_shape[1], Y=orig_shape[2])
+
+
+    # Compute directional derivative of each output dimension (M) along each of the given input directions (N)
+
+    # (f(x + eps) - f(x)) / eps
+    out = f(direction)[1]
+    out = einops.rearrange(out, "(A B) C -> A B C", A=orig_shape[0])
+    f_diff = out - f_x.unsqueeze(1)
+
+    # (batch, e'vec, output dim) matrix
+    jac = (f_diff @ I) / norms
+    
+
+    # TODO: normalize jacobian to avoid downward pressure on its norm (problem is that then we need to instantiate the full Jacobian...)
+    # only care about the angle
+    loss = torch.linalg.norm(jac, dim=(-2, -1))
+    loss = loss.mean()
+    return loss
 
 
 def calc_aug_evec_loss(model, x, var_decomp):
     # Penalize the difference between the embedding of the eigenvectors of the augmentation variance matrix and the embedding of the original image
+    model.eval()
 
-    # var_decomp are the e'vec of the 
+    # def _helper(x):
+    #     # return F.normalize(model(x)[1].squeeze(), dim=-1)
+    #     return model(x)[1].squeeze()
+    # with torch.no_grad():
+    #     J_autodiff = torch.func.jacrev(_helper)(x[0].unsqueeze(0)).flatten(1, -1)
+    #     J_finite = _finite_difference_jacobian(model, x[0].unsqueeze(0), dtype=torch.float64, eps=1e-7)
 
-
-
-    def _helper(x):
-        # return F.normalize(model(x)[1].squeeze(), dim=-1)
-        return model(x)[1].squeeze()
-
-    with torch.no_grad():
-        J_autodiff = torch.func.jacrev(_helper)(x[0]).flatten(1, -1)
-
-        J_finite = _finite_difference_jacobian(model, x)
+    # J_finite = _finite_difference_jacobian(model, x)
 
     pdb.set_trace()
 
+
+    # loss = _finite_diff_aug_var_jac(model, x, var_decomp)
+
+
+
+    model.train()
+    return loss
 
 
 
@@ -230,19 +273,24 @@ def loss_function(img_batch, model, intermediate):
     # NOTE: if we allow the update of BatchNorm running counts when calc vicreg_loss, loss diverges for some reason...
     # model.eval()
 
-    std_loss, cov_loss = vicreg_loss(model, img_batch)
+    # std_loss, cov_loss = vicreg_loss(model, img_batch)
     
-    # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
-    # tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
+    std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
+    tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
+    jac_aug_norm_loss = torch.tensor(0)
 
-    tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
-    cov_loss *= 0.1
+
+    loss = calc_aug_evec_loss(model, img_batch, intermediate)
+
+
+    # tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
+    # cov_loss *= 0.1
 
     # pdb.set_trace()
 
-    jac_aug_norm_loss = mean_jac_aug_norm.abs().mean()
+    # jac_aug_norm_loss = mean_jac_aug_norm.abs().mean()
 
-    loss = tangent_prop + std_loss + cov_loss + jac_aug_norm_loss
+    # loss = tangent_prop + std_loss + cov_loss + jac_aug_norm_loss
 
     print(f"{tangent_prop}, {jac_aug_norm_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 

@@ -75,7 +75,7 @@ def train(args):
     aug_prob_map = generate_aug_probs([c, h, w])
     model = model.to(dtype)
     model = model.to(device, non_blocking=True)
-    model = torch.compile(model, mode="max-autotune")
+    # model = torch.compile(model, mode="max-autotune")
     
     intermediate_cpu = torch.zeros((args.batch_size, c, h * w, h * w), dtype=dtype).pin_memory()
     intermediate = torch.zeros((args.batch_size, c * h * w, c * h * w), dtype=dtype, device=device)
