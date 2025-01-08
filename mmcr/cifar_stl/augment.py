@@ -273,24 +273,22 @@ def loss_function(img_batch, model, intermediate):
     # NOTE: if we allow the update of BatchNorm running counts when calc vicreg_loss, loss diverges for some reason...
     # model.eval()
 
-    # std_loss, cov_loss = vicreg_loss(model, img_batch)
+    std_loss, cov_loss = vicreg_loss(model, img_batch)
     
-    std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
-    tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
-    jac_aug_norm_loss = torch.tensor(0)
+    # std_loss, cov_loss = torch.tensor(0), torch.tensor(0)
+    # tangent_prop, mean_jac_norm = torch.tensor(0), torch.tensor(0)
+    # jac_aug_norm_loss = torch.tensor(0)
 
 
-    loss = calc_aug_evec_loss(model, img_batch, intermediate)
+    # loss = calc_aug_evec_loss(model, img_batch, intermediate)
 
 
-    # tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
-    # cov_loss *= 0.1
+    tangent_prop, mean_jac_norm, mean_jac_aug_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
+    cov_loss *= 0.1
 
-    # pdb.set_trace()
+    jac_aug_norm_loss = mean_jac_aug_norm.abs().mean()
 
-    # jac_aug_norm_loss = mean_jac_aug_norm.abs().mean()
-
-    # loss = tangent_prop + std_loss + cov_loss + jac_aug_norm_loss
+    loss = tangent_prop + std_loss + cov_loss + jac_aug_norm_loss
 
     print(f"{tangent_prop}, {jac_aug_norm_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
