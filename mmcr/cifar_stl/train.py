@@ -170,10 +170,10 @@ def train(args):
                         vis_dict = log_model_jacobian(vis_dict, stats_data, model, device)
 
                         # log output dimension var/cov
-                        vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out")
-                        vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out")
-                        vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out_norm", normalize=True)
-                        vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out_norm", normalize=True)
+                        # vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out")
+                        # vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out")
+                        # vis_dict = output_dim_stats(model, img_batch, device, vis_dict, "train_out_norm", normalize=True)
+                        # vis_dict = output_dim_stats(model, stats_data, device, vis_dict, "test_out_norm", normalize=True)
 
 
                         # calculate augmentation embedding deviation from source image
@@ -194,6 +194,7 @@ def train(args):
                         vis_dict["cov_loss"] = loss_dict["cov_loss"]
                         vis_dict["tangent_loss"] = loss_dict["tangent"]
                         vis_dict["train_jac_norm"] = loss_dict["jac_norm"]
+                        vis_dict["jac_model_align_loss"] = loss_dict["jac_model_align_loss"]
                         # vis_dict["jac_aug_norm_loss"] = loss_dict["jac_aug_norm_loss"]
                         # vis_dict["jac_norm_loss"] = loss_dict["jac_norm_loss"]
                         vis_dict["train_loss"] = total_loss / total_num

@@ -75,30 +75,53 @@ def calc_tangent_prop_loss(model, inp, var_decomp):
         # return F.normalize(model(x)[1].squeeze(), dim=-1)
         return model(x)[1].squeeze()
 
+    def _jac_model_evec_align(J, var_decomp, x, nevec=48):
+        # calculate Jacobian and model embeddings of primary variance e'vec
+        primary_var_decomp = var_decomp[-1 * nevec:, :]
+        # evec_jac_embed = (primary_var_decomp - x.flatten(1, -1)) @ J.T
+        evec_jac_embed = primary_var_decomp  @ J.T
+        primary_var_decomp = einops.rearrange(primary_var_decomp, "B (C D E) -> B C D E", D=inp.shape[-2], E=inp.shape[-1])
+        
+        # TODO: is this the right way to get the actual model embedding of an e'vec??
+        evec_embed = model(primary_var_decomp)[1]
+        
+        # normalize embedding of each e'vec and calculate dot product (angle)
+        evec_jac_embed = F.normalize(evec_jac_embed, dim=-1)
+        evec_jac_embed = evec_jac_embed.detach()        # bring model embedding close to Jac, not vice versa
+        evec_embed = F.normalize(evec_embed, dim=-1)
+        alignment = torch.bmm(evec_jac_embed.unsqueeze(1), evec_embed.unsqueeze(-1)).squeeze()
+        return alignment    
+
     def _loss_calc(x, var_decomp):
         J = torch.func.jacrev(_helper)(x).flatten(1, -1)
         assert len(J.shape) == 2
         norm = torch.linalg.norm(J)
+
+        jac_model_align = _jac_model_evec_align(J, var_decomp, x)
 
         # Norm of the Jacobian in the direction of the augmentation variance (norm of the projection of the Jacobian onto each scaled aug variance e'vec)
         # J_aug_norm = J @ (var_decomp / (torch.linalg.norm(var_decomp, dim=1).unsqueeze(0) + 1e-4))
 
         # NOTE: removes dependence of this loss on the Jacobian norm (removes the degenerate solution of minimizing the Jacobian norm). This makes the minimization of the anti-collapse loss work better
         J = F.normalize(J, dim=-1)
-        
-        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), norm
+
+        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), norm, jac_model_align
 
 
     # TODO(as) sketchy... means running stats wont be updated
     model.eval()
-    loss, jac_norm = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
+    loss, jac_norm, jac_model_align = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
+
+    # want to maximize alignment of the Jacobian embedding and the model embedding (towards +1)
+    jac_model_align_loss = (1 - jac_model_align).mean(dim=-1).mean()
 
     # J = torch.zeros((inp.shape[0], 16, *inp.shape[1:]), device=inp.device, dtype=inp.dtype)
     # for idx in range(inp.shape[0]):
     #     J[idx] = torch.func.jacrev(helper)(inp[idx])
 
+
     model.train()    
-    return loss.mean(), jac_norm.mean()
+    return loss.mean(), jac_norm.mean(), jac_model_align_loss
 
 
 
@@ -281,15 +304,14 @@ def loss_function(img_batch, model, intermediate):
 
     # loss = calc_aug_evec_loss(model, img_batch, intermediate)
 
-
-    tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
+    tangent_prop, mean_jac_norm, jac_model_align_loss = calc_tangent_prop_loss(model, img_batch, intermediate)
     cov_loss *= 0.1
 
-    loss = tangent_prop + std_loss + cov_loss
+    loss = tangent_prop + std_loss + cov_loss # + jac_model_align_loss
 
-    print(f"{tangent_prop} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
+    print(f"{tangent_prop}, {jac_model_align_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_model_align_loss":jac_model_align_loss.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):
