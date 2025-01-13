@@ -39,25 +39,9 @@ class Model(nn.Module):
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
 
-        # Running mean centering, like batch norm but without momentum, variance scaling, or learnable parameters
-        # self.bnorm = nn.BatchNorm1d(projector_dims[-1], affine=False)
-        self.bmean = torch.zeros((1, projector_dims[-1]), dtype=torch.float32)
-
-    def _apply(self, fn):
-        # https://stackoverflow.com/questions/54706146/moving-member-tensors-with-module-to-in-pytorch
-        super(Model, self)._apply(fn)
-        self.bmean = fn(self.bmean)
-        return self
-
-
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
         out = self.g(feature)
-
-        # out = self.bnorm(out)
-        if self.training and x.shape[0] > 1:
-            self.bmean = out.mean(dim=0, keepdim=True)
-        out -= self.bmean
 
         return feature, out

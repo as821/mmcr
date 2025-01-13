@@ -266,7 +266,8 @@ def off_diagonal(x):
 def vicreg_loss(model, batch):
     # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L202
     x = model(batch)[1]
-    # x = x - x.mean(dim=0)
+    mean = x.mean(dim=0)
+    x = x - mean
     batch_sz, num_features = x.shape[0], x.shape[1]
     
     std_x = torch.sqrt(x.var(dim=0) + 1e-8)
@@ -276,7 +277,7 @@ def vicreg_loss(model, batch):
     cov_x = off_diagonal(cov_x)
     cov_loss = cov_x.pow_(2).sum().div(num_features)
     
-    print(f"\t{std_x.max()} {std_x.min()} ({cov_x.max()} {cov_x.min()}). {x.mean(dim=0).abs().max()}")
+    print(f"\t{std_x.max()} {std_x.min()} ({cov_x.max()} {cov_x.min()}). {mean.abs().max()}")
     # print(f"\t{x.max(dim=0).values.cpu().detach().numpy()} \n\t{x.min(dim=0).values.cpu().detach().numpy()}")
     
     return std_loss, cov_loss
