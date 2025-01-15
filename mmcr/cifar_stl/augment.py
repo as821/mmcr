@@ -70,58 +70,29 @@ def calc_aug_ev_var(x, prob_map):
 def calc_tangent_prop_loss(model, inp, var_decomp):
     # Calculate the mean Frobenius norm of the dot products of the scaled eigenvectors of the augmentation variance matrix with the Jacobian of the model at the given input
 
-    # TODO: maybe functional_call helps?
+    # NOTE: alternatively only calculate the component of the Jacobian along these var e'vec without instantiating the full thing
+    # NOTE: must use directions in the output space though :(
+    # https://arxiv.org/pdf/1908.02729
+
     def _helper(x):
         # return F.normalize(model(x)[1].squeeze(), dim=-1)
         return model(x)[1].squeeze()
-
-    def _jac_model_evec_align(J, var_decomp, x, nevec=48):
-        # calculate Jacobian and model embeddings of primary variance e'vec
-        primary_var_decomp = var_decomp[-1 * nevec:, :]
-        # evec_jac_embed = (primary_var_decomp - x.flatten(1, -1)) @ J.T
-        evec_jac_embed = primary_var_decomp  @ J.T
-        primary_var_decomp = einops.rearrange(primary_var_decomp, "B (C D E) -> B C D E", D=inp.shape[-2], E=inp.shape[-1])
-        
-        # TODO: is this the right way to get the actual model embedding of an e'vec??
-        evec_embed = model(primary_var_decomp)[1]
-        
-        # normalize embedding of each e'vec and calculate dot product (angle)
-        evec_jac_embed = F.normalize(evec_jac_embed, dim=-1)
-        evec_jac_embed = evec_jac_embed.detach()        # bring model embedding close to Jac, not vice versa
-        evec_embed = F.normalize(evec_embed, dim=-1)
-        alignment = torch.bmm(evec_jac_embed.unsqueeze(1), evec_embed.unsqueeze(-1)).squeeze()
-        return alignment    
 
     def _loss_calc(x, var_decomp):
         J = torch.func.jacrev(_helper)(x).flatten(1, -1)
         assert len(J.shape) == 2
         norm = torch.linalg.norm(J)
 
-        jac_model_align = _jac_model_evec_align(J, var_decomp, x)
-
-        # Norm of the Jacobian in the direction of the augmentation variance (norm of the projection of the Jacobian onto each scaled aug variance e'vec)
-        # J_aug_norm = J @ (var_decomp / (torch.linalg.norm(var_decomp, dim=1).unsqueeze(0) + 1e-4))
-
         # NOTE: removes dependence of this loss on the Jacobian norm (removes the degenerate solution of minimizing the Jacobian norm). This makes the minimization of the anti-collapse loss work better
         J = F.normalize(J, dim=-1)
+        loss = torch.linalg.matrix_norm(J @ var_decomp, ord="fro")
+        return loss, norm
 
-        return torch.linalg.matrix_norm(J @ var_decomp, ord="fro"), norm, jac_model_align
-
-
-    # TODO(as) sketchy... means running stats wont be updated
     model.eval()
-    loss, jac_norm, jac_model_align = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
-
-    # want to maximize alignment of the Jacobian embedding and the model embedding (towards +1)
-    jac_model_align_loss = (1 - jac_model_align).mean(dim=-1).mean()
-
-    # J = torch.zeros((inp.shape[0], 16, *inp.shape[1:]), device=inp.device, dtype=inp.dtype)
-    # for idx in range(inp.shape[0]):
-    #     J[idx] = torch.func.jacrev(helper)(inp[idx])
-
-
+    loss, jac_norm = torch.func.vmap(_loss_calc)(inp.unsqueeze(1), var_decomp)
     model.train()    
-    return loss.mean(), jac_norm.mean(), jac_model_align_loss
+
+    return loss.mean(), jac_norm.mean()
 
 
 
@@ -201,7 +172,6 @@ def _finite_diff_aug_var_jac(f, x, direction):
     loss = loss.mean()
     return loss
 
-
 def calc_aug_evec_loss(model, x, var_decomp):
     # Penalize the difference between the embedding of the eigenvectors of the augmentation variance matrix and the embedding of the original image
     model.eval()
@@ -224,8 +194,6 @@ def calc_aug_evec_loss(model, x, var_decomp):
 
     model.train()
     return loss
-
-
 
 def sampling_tangent_prop_loss(model, x, aug, naug=1000):
     # Sampling version of the tangent prop loss to act as a sanity check when debugging possible variance matrix/Jac bugs
@@ -256,12 +224,10 @@ def sampling_tangent_prop_loss(model, x, aug, naug=1000):
     model.train()
     return loss, norm
 
-
 def off_diagonal(x):
     n, m = x.shape
     assert n == m
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
-
 
 def vicreg_loss(model, batch):
     # https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py#L202
@@ -305,14 +271,14 @@ def loss_function(img_batch, model, intermediate):
 
     # loss = calc_aug_evec_loss(model, img_batch, intermediate)
 
-    tangent_prop, mean_jac_norm, jac_model_align_loss = calc_tangent_prop_loss(model, img_batch, intermediate)
+    tangent_prop, mean_jac_norm = calc_tangent_prop_loss(model, img_batch, intermediate)
     cov_loss *= 0.1
 
-    loss = tangent_prop + std_loss + cov_loss # + jac_model_align_loss
+    loss = tangent_prop + std_loss + cov_loss
 
-    print(f"{tangent_prop}, {jac_model_align_loss} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
+    print(f"{tangent_prop} ({mean_jac_norm} {std_loss} {cov_loss}) -> {loss}")
 
-    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item(), "jac_model_align_loss":jac_model_align_loss.item()}
+    return loss, {"tangent":tangent_prop.item(), "std_loss":std_loss.item(), "cov_loss":cov_loss.item(), "jac_norm":mean_jac_norm.item()}
 
 
 def log_model_jacobian(vis_dict, stats_data, model, device):
@@ -333,10 +299,6 @@ def log_model_jacobian(vis_dict, stats_data, model, device):
     vis_dict["mean_jac_norm"] = jac_norm_sum / stats_data.shape[0]
     print(f"TEST AUG JAC NORM: {vis_dict["mean_jac_norm"]}\n")
     return vis_dict
-
-
-
-
 
 def calc_aug_var_decomp(img_batch, aug_prob_map):
     with torch.no_grad():
