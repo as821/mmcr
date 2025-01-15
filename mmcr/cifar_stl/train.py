@@ -85,11 +85,10 @@ def train(args):
 
     # upweight positive examples since there are many more negative than positive samples when batch size > 2
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda()
-    n_pos = target.sum()
-    n_neg = target.shape[0] - n_pos
-    pos_weight = args.pos_mult * (n_neg / n_pos)
-    loss_function = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)       # TODO: DICE instead??
-    print(f"Using positive weight: {pos_weight} ({n_pos} {n_neg} {target.shape})")
+    # n_pos = target.sum()
+    # n_neg = target.shape[0] - n_pos
+    # pos_weight = args.pos_mult * (n_neg / n_pos)
+    # print(f"Using positive weight: {pos_weight} ({n_pos} {n_neg} {target.shape})")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
@@ -101,13 +100,15 @@ def train(args):
         cifar_mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(-1, 1, 1).cuda()
         cifar_std = torch.tensor([0.2023, 0.1994, 0.2010]).view(-1, 1, 1).cuda()
 
+    total_loss, total_num, vis_dict = 0.0, 0, {}
+    train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
+
     model = model.cuda()
-    # model = torch.compile(model, mode="max-autotune")
+    model = torch.compile(model, mode="max-autotune")
     top_acc, total_steps = 0.0, 0
     for epoch in range(args.epochs):
         model.train()
-        total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
-        train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
+        train_bar = tqdm(train_loader)
         for step, data_tuple in enumerate(train_bar):
             optimizer.zero_grad(set_to_none=True)
 
@@ -121,12 +122,7 @@ def train(args):
             out = F.normalize(out, dim=-1)
             out = out @ out.T
             out = out.flatten()
-                
-            # convert to predictions (TODO: stupid way of doing this)
-            # out -= args.inner_thresh
-            # out = F.sigmoid(out)
 
-            # loss = loss_function(out, target)
             loss = torch.linalg.norm(target - out)
 
             # backward pass
@@ -161,22 +157,20 @@ def train(args):
                     acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
                     if acc_1 > top_acc:
                         top_acc = acc_1
+                    model.eval()
 
                     if args.wandb:
                         # check manifold subspace alignment 
-                        # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
-                        # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
+                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
+                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
 
                         # visualize augmentations
                         img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                         vis_dict = visualize_augmentations(vis_dict, img_batch)
-                        
-                        # stats on singular values from last gradient step
-                        # vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
-                        # _, feat_dict = loss_function(features.detach().float())
-                        # vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
 
+                        assert not model.training
                         vis_dict["val_acc_1_out"], vis_dict["val_acc_5_out"] = test_one_epoch(model, memory_loader, test_loader, feat=False)
+                        model.eval()
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
@@ -191,8 +185,12 @@ def train(args):
                         vis_dict["train_fpr"] = train_fpr / len(train_loader)
 
                         wandb.log(vis_dict, step=total_steps)
-                    model.train()
 
+                    assert not model.training
+                    model.train()
+                    
+                    total_loss, total_num, vis_dict = 0.0, 0, {}
+                    train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
 
                     if epoch % args.save_freq == 0 or acc_1 == top_acc:
                         torch.save(
