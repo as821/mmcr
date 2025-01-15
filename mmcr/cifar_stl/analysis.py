@@ -175,4 +175,5 @@ def output_dim_stats(model, x, device, vis_dict, name, normalize=False):
 
     return vis_dict
 
-
+def vis_aug_cov(x, aug):
+    # Visualize some per-pixel covariances as well as the primary e'vec of the covariance matrix
