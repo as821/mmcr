@@ -4,8 +4,10 @@ from tqdm import tqdm
 import einops
 import wandb
 
+import torch.nn.functional as F
+
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
-from mmcr.cifar_stl.models import Model, Projector
+from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations
@@ -66,9 +68,8 @@ def train(args):
         dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
     )
     model = Model(projector_dims=[512, 128], dataset=args.dataset)
-    projector = Projector()
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True, prefetch_factor=4, persistent_workers=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True #, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=16
@@ -78,16 +79,16 @@ def train(args):
     )
 
     # test set with training transformations
-    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=100))
-    stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=500, shuffle=False, num_workers=12)
+    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=10))
+    stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
     stats_data = next(iter(stats_loader))
 
     # upweight positive examples since there are many more negative than positive samples when batch size > 2
-    target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda().unsqueeze(-1)
+    target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda()
     n_pos = target.sum()
-    n_neg = (target.shape[0] * target.shape[1]) - n_pos
+    n_neg = target.shape[0] - n_pos
     pos_weight = args.pos_mult * (n_neg / n_pos)
-    loss_function = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    loss_function = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)       # TODO: DICE instead??
     print(f"Using positive weight: {pos_weight} ({n_pos} {n_neg} {target.shape})")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -101,33 +102,32 @@ def train(args):
         cifar_std = torch.tensor([0.2023, 0.1994, 0.2010]).view(-1, 1, 1).cuda()
 
     model = model.cuda()
-    projector = projector.cuda()
-    model = torch.compile(model, mode="max-autotune")
-    projector = torch.compile(projector, mode="max-autotune")
-    top_acc = 0.0
+    # model = torch.compile(model, mode="max-autotune")
+    top_acc, total_steps = 0.0, 0
     for epoch in range(args.epochs):
         model.train()
         total_loss, total_num, train_bar, vis_dict = 0.0, 0, tqdm(train_loader), {}
         train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
         for step, data_tuple in enumerate(train_bar):
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             # forward pass
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-            features, _ = model(img_batch)
+            _, out = model(img_batch)
             
-            # run projector on every pair of features, O(N^2)
-            M = features.shape[0]
-            assert M == args.batch_size * args.n_aug
-            idx1, idx2 = torch.meshgrid(torch.arange(M), torch.arange(M), indexing="ij")
-            out = projector(features[idx1.flatten()], features[idx2.flatten()]).float()
+            # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
+            out = F.normalize(out, dim=-1)
+            out = out @ out.T
+            out = out.flatten()
+                
+            # convert to predictions (TODO: stupid way of doing this)
+            # out -= args.inner_thresh
+            # out = F.sigmoid(out)
 
-            loss = loss_function(out, target)
-
-
-            # loss, loss_dict = loss_function(out.float())
+            # loss = loss_function(out, target)
+            loss = torch.linalg.norm(target - out)
 
             # backward pass
             loss.backward()
@@ -138,7 +138,7 @@ def train(args):
             total_num += data_tuple[0].size(0)
             total_loss += loss.item() * data_tuple[0].size(0)
 
-            pred = torch.nn.functional.sigmoid(out.detach()) > 0.5
+            pred = out.detach() > 0.5
             acc, prec, recall, fpr, fnr = calc_metrics(pred, target)
 
             train_acc += acc
@@ -153,53 +153,52 @@ def train(args):
                     epoch, args.epochs, loss.item(), acc.item(), prec.item(), recall.item(), fpr.item(), fnr.item()
                 )
             )
+            total_steps += 1
 
-        if epoch % 1 == 0:
-            with torch.no_grad():
-                model.eval()
-                acc_1, acc_5 = test_one_epoch(
-                    model,
-                    memory_loader,
-                    test_loader,
-                )
-                if acc_1 > top_acc:
-                    top_acc = acc_1
+            if total_steps % args.log_freq == 0:
+                with torch.no_grad():
+                    model.eval()
+                    acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
+                    if acc_1 > top_acc:
+                        top_acc = acc_1
 
-                if args.wandb:
-                    # check manifold subspace alignment 
-                    # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
-                    # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
+                    if args.wandb:
+                        # check manifold subspace alignment 
+                        # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
+                        # vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
 
-                    # visualize augmentations
-                    img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
-                    vis_dict = visualize_augmentations(vis_dict, img_batch)
-                    
-                    # stats on singular values from last gradient step
-                    # vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
-                    # _, feat_dict = loss_function(features.detach().float())
-                    # vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
+                        # visualize augmentations
+                        img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                        vis_dict = visualize_augmentations(vis_dict, img_batch)
+                        
+                        # stats on singular values from last gradient step
+                        # vis_dict = vis_dist("global_sing_vals", "sing_val", vis_dict, loss_dict)
+                        # _, feat_dict = loss_function(features.detach().float())
+                        # vis_dict = vis_dist("global_sing_vals", "feat_sing_val", vis_dict, feat_dict)
 
-                    vis_dict["train_loss"] = total_loss / total_num
-                    vis_dict["val_acc_1"] = acc_1
-                    vis_dict["val_acc_5"] = acc_5
-                    vis_dict["lr"] = scheduler.get_last_lr()[0]
-                    
-                    # TODO(as) actually run this on the test set...
-                    vis_dict["train_acc"] = train_acc / len(train_loader)
-                    vis_dict["train_prec"] = train_prec / len(train_loader)
-                    vis_dict["train_recall"] = train_recall / len(train_loader)
-                    vis_dict["train_fnr"] = train_fnr / len(train_loader)
-                    vis_dict["train_fpr"] = train_fpr / len(train_loader)
+                        vis_dict["val_acc_1_out"], vis_dict["val_acc_5_out"] = test_one_epoch(model, memory_loader, test_loader, feat=False)
 
-                    wandb.log(vis_dict, step=epoch)
-                model.train()
+                        vis_dict["train_loss"] = total_loss / total_num
+                        vis_dict["val_acc_1"] = acc_1
+                        vis_dict["val_acc_5"] = acc_5
+                        vis_dict["lr"] = scheduler.get_last_lr()[0]
+                        
+                        # TODO(as) actually run this on the test set...
+                        vis_dict["train_acc"] = train_acc / len(train_loader)
+                        vis_dict["train_prec"] = train_prec / len(train_loader)
+                        vis_dict["train_recall"] = train_recall / len(train_loader)
+                        vis_dict["train_fnr"] = train_fnr / len(train_loader)
+                        vis_dict["train_fpr"] = train_fpr / len(train_loader)
+
+                        wandb.log(vis_dict, step=total_steps)
+                    model.train()
 
 
-                if epoch % args.save_freq == 0 or acc_1 == top_acc:
-                    torch.save(
-                        model.state_dict(),
-                        f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
-                    )
+                    if epoch % args.save_freq == 0 or acc_1 == top_acc:
+                        torch.save(
+                            model.state_dict(),
+                            f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
+                        )
 
     if args.wandb:
         wandb.finish()

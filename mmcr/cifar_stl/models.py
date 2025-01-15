@@ -36,9 +36,7 @@ class Model(nn.Module):
                     3, 64, kernel_size=3, stride=1, padding=1, bias=False
                 )
             if dataset == "cifar10" or "cifar100":
-                if not isinstance(module, nn.Linear) and not isinstance(
-                    module, nn.MaxPool2d
-                ):
+                if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
                     self.f.append(module)
             elif dataset == "stl10":
                 if not isinstance(module, nn.Linear):
@@ -47,20 +45,19 @@ class Model(nn.Module):
         self.f = nn.Sequential(*self.f)
 
         # projection head (Following exactly barlow twins offical repo)
-        # projector_dims = [512] + projector_dims
-        # layers = []
-        # for i in range(len(projector_dims) - 2):
-        #     layers.append(
-        #         nn.Linear(projector_dims[i], projector_dims[i + 1], bias=False)
-        #     )
-        #     layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
-        #     layers.append(nn.ReLU())
-        # layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
-        # self.g = nn.Sequential(*layers)
+        projector_dims = [512] + projector_dims
+        layers = []
+        for i in range(len(projector_dims) - 2):
+            layers.append(
+                nn.Linear(projector_dims[i], projector_dims[i + 1], bias=True)
+            )
+            layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
+            layers.append(nn.ReLU())
+        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=True))
+        self.g = nn.Sequential(*layers)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
-        # out = self.g(feature)
-        out = None
+        out = self.g(feature)
         return feature, out
