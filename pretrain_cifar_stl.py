@@ -19,6 +19,7 @@ parser.add_argument("--save_folder", type=str, default="./training_checkpoints/c
 parser.add_argument("--pos_mult", type=float, default=1.0)
 parser.add_argument("--log_freq", type=int, default=500)
 parser.add_argument("--inner_thresh", type=float, default=0.5)
+parser.add_argument("--warmup_epoch", type=int, default=0)
 
 
 parser.add_argument("--mem_bank", type=int, default=0)

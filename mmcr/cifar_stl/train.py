@@ -85,13 +85,14 @@ def train(args):
 
     # upweight positive examples since there are many more negative than positive samples when batch size > 2
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda()
-    # n_pos = target.sum()
-    # n_neg = target.shape[0] - n_pos
-    # pos_weight = args.pos_mult * (n_neg / n_pos)
-    # print(f"Using positive weight: {pos_weight} ({n_pos} {n_neg} {target.shape})")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
+
+    warmup_iter = args.warmup_epoch * len(train_loader)
+    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+        torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_iter),
+        torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
+    ])
 
     if args.wandb:
         wandb.watch(model, log_freq=10)
