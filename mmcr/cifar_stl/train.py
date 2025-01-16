@@ -112,7 +112,7 @@ def train(args):
             # forward pass
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
-            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W")
+            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda()
             _, out = model(img_batch)
             
             # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
