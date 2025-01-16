@@ -4,6 +4,7 @@ import wandb
 from tqdm import tqdm
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import einops
 
 
 
@@ -96,4 +97,27 @@ def visualize_augmentations(vis_dict, tensor):
     vis_dict["augmentations"] = wandb.Image(plt)
     plt.close()
     return vis_dict
+
+def loss_breakdown(loss_mx, target, labels, n_aug):
+    with torch.no_grad():
+        batch_sz = labels.shape[0]
+        tot_aug = batch_sz * n_aug
+        loss_mx = einops.rearrange(loss_mx, "(A B) -> A B", A=tot_aug)
+        loss_mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=batch_sz, C=batch_sz)
+        loss_mx = loss_mx.sum(dim=-1)
+
+        # breakdown loss by postive/negative samples
+        pos_loss = loss_mx.diag().sum()
+        loss_mx.fill_diagonal_(0)
+        neg_loss = loss_mx.sum()
+
+        # breakdown negative loss by inter/intra class
+        intra_class_mask = labels.unsqueeze(-1) == labels.unsqueeze(0)
+        intra_class = loss_mx[intra_class_mask].sum()
+        inter_class = loss_mx[~intra_class_mask].sum()
+
+    return pos_loss, neg_loss, inter_class, intra_class
+
+
+
 

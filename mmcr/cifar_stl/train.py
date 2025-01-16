@@ -10,7 +10,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown
 
 
 import pdb
@@ -124,30 +124,33 @@ def train(args):
             out = out @ out.T
             out = out.flatten()
 
-            loss = torch.linalg.norm(target - out)
+            # loss = torch.linalg.norm(target - out)
+            loss_mx = (target - out) ** 2
+            loss = loss_mx.sum()
 
             # backward pass
             loss.backward()
             optimizer.step()
             scheduler.step()
 
+            pos_loss, neg_loss, inter_class, intra_class = loss_breakdown(loss_mx, target, labels, args.n_aug)
+
             # update the training bar
             total_num += data_tuple[0].size(0)
             total_loss += loss.item() * data_tuple[0].size(0)
 
-            pred = out.detach() > 0.5
-            acc, prec, recall, fpr, fnr = calc_metrics(pred, target)
-
-            train_acc += acc
-            train_prec += prec
-            train_recall += recall
-            train_fpr += fpr
-            train_fnr += fnr
+            # pred = out.detach() > 0.5
+            # acc, prec, recall, fpr, fnr = calc_metrics(pred, target)
+            # train_acc += acc
+            # train_prec += prec
+            # train_recall += recall
+            # train_fpr += fpr
+            # train_fnr += fnr
 
 
             train_bar.set_description(
-                "Train Epoch: [{}/{}] Loss: {:.4f}, acc: {:.4f}, prec: {:.4f} rec: {:.4f} fpr: {:.4f} fnr: {:.4f}".format(
-                    epoch, args.epochs, loss.item(), acc.item(), prec.item(), recall.item(), fpr.item(), fnr.item()
+                "Train Epoch: [{}/{}] Loss: {:.1f}, pos: {:.1f}, neg: {:.1f} inter: {:.1f} intra: {:.1f}".format(
+                    epoch, args.epochs, loss.item(), pos_loss.item(), neg_loss.item(), inter_class.item(), intra_class.item()
                 )
             )
             total_steps += 1
@@ -177,13 +180,19 @@ def train(args):
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
+
+                        vis_dict["pos_loss"] = pos_loss
+                        vis_dict["neg_loss"] = neg_loss
+                        vis_dict["inter_class_loss"] = inter_class
+                        vis_dict["intra_class_loss"] = intra_class
+
                         
                         # TODO(as) actually run this on the test set...
-                        vis_dict["train_acc"] = train_acc / len(train_loader)
-                        vis_dict["train_prec"] = train_prec / len(train_loader)
-                        vis_dict["train_recall"] = train_recall / len(train_loader)
-                        vis_dict["train_fnr"] = train_fnr / len(train_loader)
-                        vis_dict["train_fpr"] = train_fpr / len(train_loader)
+                        # vis_dict["train_acc"] = train_acc / len(train_loader)
+                        # vis_dict["train_prec"] = train_prec / len(train_loader)
+                        # vis_dict["train_recall"] = train_recall / len(train_loader)
+                        # vis_dict["train_fnr"] = train_fnr / len(train_loader)
+                        # vis_dict["train_fpr"] = train_fpr / len(train_loader)
 
                         wandb.log(vis_dict, step=total_steps)
 
@@ -191,7 +200,7 @@ def train(args):
                     model.train()
                     
                     total_loss, total_num, vis_dict = 0.0, 0, {}
-                    train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
+                    # train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
 
                     if epoch % args.save_freq == 0 or acc_1 == top_acc:
                         torch.save(
