@@ -102,7 +102,7 @@ def train(args):
         cifar_std = torch.tensor([0.2023, 0.1994, 0.2010]).view(-1, 1, 1).cuda()
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
+    tot_pos, tot_neg, tot_inter, tot_intra = 0, 0, 0, 0
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
@@ -139,13 +139,10 @@ def train(args):
             total_num += data_tuple[0].size(0)
             total_loss += loss.item() * data_tuple[0].size(0)
 
-            # pred = out.detach() > 0.5
-            # acc, prec, recall, fpr, fnr = calc_metrics(pred, target)
-            # train_acc += acc
-            # train_prec += prec
-            # train_recall += recall
-            # train_fpr += fpr
-            # train_fnr += fnr
+            tot_pos += pos_loss / args.log_freq
+            tot_neg += neg_loss / args.log_freq
+            tot_inter += inter_class / args.log_freq
+            tot_intra += intra_class / args.log_freq
 
 
             train_bar.set_description(
@@ -186,21 +183,13 @@ def train(args):
                         vis_dict["inter_class_loss"] = inter_class
                         vis_dict["intra_class_loss"] = intra_class
 
-                        
-                        # TODO(as) actually run this on the test set...
-                        # vis_dict["train_acc"] = train_acc / len(train_loader)
-                        # vis_dict["train_prec"] = train_prec / len(train_loader)
-                        # vis_dict["train_recall"] = train_recall / len(train_loader)
-                        # vis_dict["train_fnr"] = train_fnr / len(train_loader)
-                        # vis_dict["train_fpr"] = train_fpr / len(train_loader)
-
                         wandb.log(vis_dict, step=total_steps)
 
                     assert not model.training
                     model.train()
                     
                     total_loss, total_num, vis_dict = 0.0, 0, {}
-                    # train_acc, train_prec, train_recall, train_fpr, train_fnr = 0, 0, 0, 0, 0
+                    tot_pos, tot_neg, tot_inter, tot_intra = 0, 0, 0, 0
 
                     if epoch % args.save_freq == 0 or acc_1 == top_acc:
                         torch.save(
