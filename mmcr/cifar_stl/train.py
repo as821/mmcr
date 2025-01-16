@@ -83,8 +83,6 @@ def train(args):
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
     stats_data = next(iter(stats_loader))
 
-    # upweight positive examples since there are many more negative than positive samples when batch size > 2
-    target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).flatten().cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -97,12 +95,10 @@ def train(args):
     if args.wandb:
         wandb.watch(model, log_freq=10)
 
-    if args.diffusion_aug:
-        cifar_mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(-1, 1, 1).cuda()
-        cifar_std = torch.tensor([0.2023, 0.1994, 0.2010]).view(-1, 1, 1).cuda()
-
     total_loss, total_num, vis_dict = 0.0, 0, {}
     tot_pos, tot_neg, tot_inter, tot_intra = 0, 0, 0, 0
+
+    target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
@@ -116,13 +112,12 @@ def train(args):
             # forward pass
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
-            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
+            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W")
             _, out = model(img_batch)
             
             # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
             out = F.normalize(out, dim=-1)
             out = out @ out.T
-            out = out.flatten()
 
             # loss = torch.linalg.norm(target - out)
             loss_mx = (target - out) ** 2

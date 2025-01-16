@@ -102,7 +102,6 @@ def loss_breakdown(loss_mx, target, labels, n_aug):
     with torch.no_grad():
         batch_sz = labels.shape[0]
         tot_aug = batch_sz * n_aug
-        loss_mx = einops.rearrange(loss_mx, "(A B) -> A B", A=tot_aug)
         loss_mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=batch_sz, C=batch_sz)
         loss_mx = loss_mx.sum(dim=-1)
 
