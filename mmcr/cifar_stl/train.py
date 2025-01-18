@@ -99,6 +99,12 @@ def train(args):
     tot_pos, tot_neg, tot_inter, tot_intra = 0, 0, 0, 0
 
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
+    if args.pos_reweight:
+        npos = (args.n_aug * args.n_aug) * args.batch_size
+        nneg = (args.n_aug * args.batch_size) ** 2 - npos
+        pos_weight = nneg / npos
+    else:
+        pos_weight = 1
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
@@ -119,9 +125,16 @@ def train(args):
             out = F.normalize(out, dim=-1)
             out = out @ out.T
 
-            # loss = torch.linalg.norm(target - out)
             loss_mx = (target - out) ** 2
             loss = loss_mx.sum()
+            if args.pos_reweight:
+                tot_aug = args.batch_size * args.n_aug
+                pos_loss = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1).diag().sum()
+                neg_loss = loss - pos_loss
+
+                loss = pos_weight * pos_loss + neg_loss
+            else:
+                loss = loss_mx.sum()
 
             # backward pass
             loss.backward()
@@ -177,6 +190,8 @@ def train(args):
                         vis_dict["neg_loss"] = neg_loss
                         vis_dict["inter_class_loss"] = inter_class
                         vis_dict["intra_class_loss"] = intra_class
+
+                        vis_dict["pos_weight"] = pos_weight
 
                         wandb.log(vis_dict, step=total_steps)
 
