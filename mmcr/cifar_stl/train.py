@@ -1,3 +1,7 @@
+# without this we lose GIGABYTES to memory fragmentation
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
 import torchvision
 from tqdm import tqdm
