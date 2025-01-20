@@ -104,13 +104,20 @@ def train(args):
 
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
     if args.pos_reweight:
+        npos = (args.n_aug * args.n_aug) * args.batch_size
+        nneg = (args.n_aug * args.batch_size) ** 2 - npos
         if args.pos_weight > 0:
             pos_weight = args.pos_weight
         else:
-            # npos = (args.n_aug * args.n_aug) * args.batch_size
-            # nneg = (args.n_aug * args.batch_size) ** 2 - npos
-            # pos_weight = nneg / npos
-            pos_weight = args.batch_size - 1    # algebraically equiv. to above
+            pos_weight = nneg / npos
+            # pos_weight = args.batch_size - 1    # algebraically equiv. to above
+        
+        rescaler = (npos + nneg) / (npos * pos_weight + nneg)
+    elif args.neg_sample:
+        pos_weight = args.nneg_sample_mult
+        npos = (args.n_aug * args.n_aug) * args.batch_size
+        nneg = (args.n_aug * args.batch_size) ** 2 - npos
+        rescaler = (npos + nneg) / (npos * pos_weight + nneg)
     else:
         pos_weight = 1
 
@@ -135,15 +142,21 @@ def train(args):
 
             loss_mx = (target - out) ** 2
             if args.pos_reweight:
-                pos_loss = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1).diag().sum()
-                
-                loss = loss_mx.sum()
+                mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
+                pos_loss = mx.diag()
+                loss = mx.sum(dim=-1)
                 neg_loss = loss - pos_loss
-                loss = pos_weight * pos_loss + neg_loss
+                pos_loss *= pos_weight
+                
+                # normalize to account for the fact that we effectively just counted each positive example pos_weight times
+                # positive and negative samples should now have equal effect on the loss
+                loss = (pos_loss + neg_loss) * rescaler
+                loss = loss.mean()
             elif args.neg_sample:
                 mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
-                pos_loss = mx.diag().sum()
-
+                pos_loss = mx.diag()
+                pos_loss *= pos_weight
+                
                 out_mx = einops.rearrange(out, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
 
                 # ensure positive samples are never included in negative loss below
@@ -157,10 +170,10 @@ def train(args):
                 gather_mx = torch.gather(mx, 1, easy_negative_indices)
                 neg_loss = gather_mx.sum()
 
-                pos_weight = args.nneg_sample_mult
-                loss = pos_weight * pos_loss + neg_loss
+                loss = (pos_loss + neg_loss) * rescaler
+                loss = loss.mean()
             else:
-                loss = loss_mx.sum()
+                loss = loss_mx.sum(dim=-1).mean()
 
             # backward pass
             loss.backward()
