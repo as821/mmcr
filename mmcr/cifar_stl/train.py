@@ -104,9 +104,10 @@ def train(args):
 
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
     if args.pos_reweight:
-        npos = (args.n_aug * args.n_aug) * args.batch_size
-        nneg = (args.n_aug * args.batch_size) ** 2 - npos
-        pos_weight = nneg / npos
+        # npos = (args.n_aug * args.n_aug) * args.batch_size
+        # nneg = (args.n_aug * args.batch_size) ** 2 - npos
+        # pos_weight = nneg / npos
+        pos_weight = args.batch_size - 1    # algebraically equiv. to above
     else:
         pos_weight = 1
 
