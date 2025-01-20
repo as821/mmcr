@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import einops
 
+import pdb
 
 
 def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
@@ -98,10 +99,9 @@ def visualize_augmentations(vis_dict, tensor):
     plt.close()
     return vis_dict
 
-def loss_breakdown(loss_mx, target, labels, n_aug):
+def loss_breakdown(loss_mx, labels):
     with torch.no_grad():
         batch_sz = labels.shape[0]
-        tot_aug = batch_sz * n_aug
         loss_mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=batch_sz, C=batch_sz)
         loss_mx = loss_mx.sum(dim=-1)
 
@@ -117,6 +117,60 @@ def loss_breakdown(loss_mx, target, labels, n_aug):
 
     return pos_loss, neg_loss, inter_class, intra_class
 
+def log_pos_neg_sample_embedding(args, vis_dict, out, labels):
+    # Plot distribution of positive/negative sample embedding similarities
+    # NOTE: can be very slow, run infrequently
+    with torch.no_grad():
+        out_mx = einops.rearrange(out, "(A B) (C D) -> A C B D", A=args.batch_size, C=args.batch_size)
+        
+
+        # positive embeddding similarities (remove self-similarity)
+        pos_idx = torch.arange(out_mx.shape[0])
+        pos = out_mx[pos_idx, pos_idx, :]
+        mask = ~torch.eye(pos.shape[1], dtype=bool)
+        pos_no_diag = pos.permute((1, 2, 0))[mask].flatten().cpu().numpy()
+
+        plt.figure(figsize=(10, 6))
+        plt.hist(pos_no_diag, bins=50, edgecolor='black')
+        plt.title('Positive Sample Similarities')
+        plt.xlabel('Cosine Similarity')
+        plt.ylabel('Frequency')
+        vis_dict["pos_sim_hist"] = wandb.Image(plt)
+        plt.close()
+
+        # negative sample similarities
+        mask = ~torch.eye(out_mx.shape[0], dtype=bool)
+        neg = out_mx[mask]
+        plt.figure(figsize=(10, 6))
+        plt.hist(neg.cpu().numpy().flatten(), bins=50, edgecolor='black')
+        plt.title('Negative Sample Similarities')
+        plt.xlabel('Cosine Similarity')
+        plt.ylabel('Frequency')
+        vis_dict["neg_sim_hist"] = wandb.Image(plt)
+        plt.close()
+
+        # inter/intra class similarities
+        intra_class_mask = labels.unsqueeze(-1) == labels.unsqueeze(0)
+        intra = out_mx[intra_class_mask & mask]
+        inter = out_mx[~intra_class_mask & mask]
+
+        plt.figure(figsize=(10, 6))
+        plt.hist(intra.cpu().numpy().flatten(), bins=50, edgecolor='black')
+        plt.title('(Intra) Negative Sample Similarities')
+        plt.xlabel('Cosine Similarity')
+        plt.ylabel('Frequency')
+        vis_dict["neg_intra_sim_hist"] = wandb.Image(plt)
+        plt.close()
+
+        plt.figure(figsize=(10, 6))
+        plt.hist(inter.cpu().numpy().flatten(), bins=50, edgecolor='black')
+        plt.title('(Inter) Negative Sample Similarities')
+        plt.xlabel('Cosine Similarity')
+        plt.ylabel('Frequency')
+        vis_dict["neg_inter_sim_hist"] = wandb.Image(plt)
+        plt.close()
+
+        return vis_dict
 
 
 

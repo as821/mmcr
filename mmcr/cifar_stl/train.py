@@ -14,7 +14,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown, log_pos_neg_sample_embedding
 
 
 import pdb
@@ -100,14 +100,17 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    tot_pos, tot_neg, tot_inter, tot_intra = 0, 0, 0, 0
+    tot_pos, tot_neg, tot_inter, tot_intra, tot_intra_frac = 0, 0, 0, 0, 0
 
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
     if args.pos_reweight:
-        # npos = (args.n_aug * args.n_aug) * args.batch_size
-        # nneg = (args.n_aug * args.batch_size) ** 2 - npos
-        # pos_weight = nneg / npos
-        pos_weight = args.batch_size - 1    # algebraically equiv. to above
+        if args.pos_weight > 0:
+            pos_weight = args.pos_weight
+        else:
+            # npos = (args.n_aug * args.n_aug) * args.batch_size
+            # nneg = (args.n_aug * args.batch_size) ** 2 - npos
+            # pos_weight = nneg / npos
+            pos_weight = args.batch_size - 1    # algebraically equiv. to above
     else:
         pos_weight = 1
 
@@ -131,12 +134,30 @@ def train(args):
             out = out @ out.T
 
             loss_mx = (target - out) ** 2
-            loss = loss_mx.sum()
             if args.pos_reweight:
-                tot_aug = args.batch_size * args.n_aug
                 pos_loss = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1).diag().sum()
+                
+                loss = loss_mx.sum()
                 neg_loss = loss - pos_loss
+                loss = pos_weight * pos_loss + neg_loss
+            elif args.neg_sample:
+                mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
+                pos_loss = mx.diag().sum()
 
+                out_mx = einops.rearrange(out, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
+
+                # ensure positive samples are never included in negative loss below
+                pos_idx = torch.arange(args.batch_size)
+                out_mx[pos_idx, pos_idx] = out_mx.max() + 1
+
+                # for each augmentation, find the nneg_sample_mult images who augmentation embeddings are least similar to this augmentation
+                assert args.nneg_sample_mult < (args.batch_size - 1)
+                easy_negative_indices = torch.topk(out_mx, args.nneg_sample_mult, dim=-1, largest=False, sorted=False)[1]
+
+                gather_mx = torch.gather(mx, 1, easy_negative_indices)
+                neg_loss = gather_mx.sum()
+
+                pos_weight = args.nneg_sample_mult
                 loss = pos_weight * pos_loss + neg_loss
             else:
                 loss = loss_mx.sum()
@@ -146,7 +167,18 @@ def train(args):
             optimizer.step()
             scheduler.step()
 
-            pos_loss, neg_loss, inter_class, intra_class = loss_breakdown(loss_mx, target, labels, args.n_aug)
+            if args.neg_sample:
+                with torch.no_grad():
+                    # amount of intra/inter class loss and fraction of selected images that are intra class
+                    intra_class_mask = (labels.unsqueeze(-1) == labels.unsqueeze(0)).cuda().int()
+                    intra_class = mx * intra_class_mask
+                    intra_class = torch.gather(intra_class, 1, easy_negative_indices).sum()
+                    inter_class = neg_loss - intra_class
+
+                    intra_frac = torch.gather(intra_class_mask, 1, easy_negative_indices).sum() / (easy_negative_indices.shape[0] * easy_negative_indices.shape[1])
+                    tot_intra_frac += intra_frac / args.log_freq
+            else:
+                pos_loss, neg_loss, inter_class, intra_class = loss_breakdown(loss_mx, labels)
 
             # update the training bar
             total_num += data_tuple[0].size(0)
@@ -186,16 +218,20 @@ def train(args):
                         vis_dict["val_acc_1_out"], vis_dict["val_acc_5_out"] = test_one_epoch(model, memory_loader, test_loader, feat=False)
                         model.eval()
 
+                        # track positive/negative sample embedding similarities
+                        vis_dict = log_pos_neg_sample_embedding(args, vis_dict, out, labels)
+
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
 
-                        vis_dict["pos_loss"] = pos_loss
-                        vis_dict["neg_loss"] = neg_loss
-                        vis_dict["inter_class_loss"] = inter_class
-                        vis_dict["intra_class_loss"] = intra_class
-
+                        vis_dict["pos_loss"] = tot_pos
+                        vis_dict["neg_loss"] = tot_neg
+                        vis_dict["inter_class_loss"] = tot_inter
+                        vis_dict["intra_class_loss"] = tot_intra
+                        if args.neg_sample:
+                            vis_dict["intra_class_frac"] = tot_intra_frac
                         vis_dict["pos_weight"] = pos_weight
 
                         wandb.log(vis_dict, step=total_steps)
@@ -204,7 +240,7 @@ def train(args):
                     model.train()
                     
                     total_loss, total_num, vis_dict = 0.0, 0, {}
-                    tot_pos, tot_neg, tot_inter, tot_intra = 0, 0, 0, 0
+                    tot_pos, tot_neg, tot_inter, tot_intra, tot_intra_frac = 0, 0, 0, 0, 0
 
                     if epoch % args.save_freq == 0 or acc_1 == top_acc:
                         torch.save(

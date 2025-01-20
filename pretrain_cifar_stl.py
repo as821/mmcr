@@ -21,7 +21,10 @@ parser.add_argument("--log_freq", type=int, default=500)
 parser.add_argument("--inner_thresh", type=float, default=0.5)
 parser.add_argument("--warmup_epoch", type=int, default=0)
 parser.add_argument("--pos_reweight", action="store_true")
+parser.add_argument("--pos_weight", type=float, default=0, help="zero to calculate parity with negative samples")
 
+parser.add_argument("--neg_sample", action="store_true")
+parser.add_argument("--nneg_sample_mult", type=int, default=40)
 
 parser.add_argument("--mem_bank", type=int, default=0)
 parser.add_argument("--stronger_aug", action="store_true")
