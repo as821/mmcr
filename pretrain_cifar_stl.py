@@ -26,6 +26,8 @@ parser.add_argument("--pos_weight", type=float, default=0, help="zero to calcula
 parser.add_argument("--neg_sample", action="store_true")
 parser.add_argument("--nneg_sample_mult", type=int, default=40)
 
+parser.add_argument("--supervised", action="store_true")
+
 parser.add_argument("--mem_bank", type=int, default=0)
 parser.add_argument("--stronger_aug", action="store_true")
 parser.add_argument("--strongest_aug", action="store_true")

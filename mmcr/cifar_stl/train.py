@@ -140,6 +140,13 @@ def train(args):
             out = F.normalize(out, dim=-1)
             out = out @ out.T
 
+            if args.supervised:
+                intra_class_mask = (labels.unsqueeze(-1) == labels.unsqueeze(0)).cuda().int()
+                target = torch.zeros((args.batch_size, args.batch_size, args.n_aug, args.n_aug), device="cuda", dtype=torch.float32)
+                target[:, :, :] = intra_class_mask.unsqueeze(-1).unsqueeze(-1)
+                target = einops.rearrange(target, "A C B D -> (A B) (C D)")
+
+
             loss_mx = (target - out) ** 2
             if args.pos_reweight:
                 mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
@@ -156,7 +163,7 @@ def train(args):
                 mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
                 pos_loss = mx.diag()
                 pos_loss *= pos_weight
-                
+
                 out_mx = einops.rearrange(out, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
 
                 # ensure positive samples are never included in negative loss below
@@ -168,7 +175,7 @@ def train(args):
                 easy_negative_indices = torch.topk(out_mx, args.nneg_sample_mult, dim=-1, largest=False, sorted=False)[1]
 
                 gather_mx = torch.gather(mx, 1, easy_negative_indices)
-                neg_loss = gather_mx.sum()
+                neg_loss = gather_mx.sum(dim=-1)
 
                 loss = (pos_loss + neg_loss) * rescaler
                 loss = loss.mean()
@@ -182,6 +189,9 @@ def train(args):
 
             if args.neg_sample:
                 with torch.no_grad():
+                    pos_loss = pos_loss.sum()
+                    neg_loss = neg_loss.sum()
+
                     # amount of intra/inter class loss and fraction of selected images that are intra class
                     intra_class_mask = (labels.unsqueeze(-1) == labels.unsqueeze(0)).cuda().int()
                     intra_class = mx * intra_class_mask
