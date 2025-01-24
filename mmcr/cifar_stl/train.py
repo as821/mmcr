@@ -88,7 +88,7 @@ def train(args):
     stats_data = next(iter(stats_loader))
 
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, fused=True)
 
     warmup_iter = args.warmup_epoch * len(train_loader)
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
@@ -184,6 +184,8 @@ def train(args):
 
             # backward pass
             loss.backward()
+            if args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
             scheduler.step()
 
