@@ -88,7 +88,7 @@ def train(args):
     stats_data = next(iter(stats_loader))
 
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, fused=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, fused=True)
 
     warmup_iter = args.warmup_epoch * len(train_loader)
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
