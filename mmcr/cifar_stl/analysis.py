@@ -199,6 +199,7 @@ def visualize_feature_cov_decomp(vis_dict, out, step):
         plt.ylabel('Eigenvalue')
         plt.title('Feature Covariance Matrix Eigenvalues')
         # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.yscale('log')
         plt.grid(True)
         plt.tight_layout()
 
