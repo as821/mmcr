@@ -3,6 +3,10 @@ from mmcr.cifar_stl.train import train
 from argparse import ArgumentParser
 # import submitit
 
+
+# NOTE: e'val plot test:
+#   python3 pretrain_cifar_stl.py --save_folder=training_checkpoints/placeholder --n_aug=100 --batch_size=48 --strongest_aug --lr=0.01 --final_lr=0.01 --warmup_epoch=0 --epochs=5 --pos_reweight --weight_decay=1e-2 --log_freq=10
+
 parser = ArgumentParser()
 parser.add_argument("--dataset", type=str, default="cifar10")
 parser.add_argument("--batch_size", type=int, default=32)

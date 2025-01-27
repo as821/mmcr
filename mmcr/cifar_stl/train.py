@@ -14,7 +14,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown, log_pos_neg_sample_embedding
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown, log_pos_neg_sample_embedding, visualize_feature_cov_decomp
 
 
 import pdb
@@ -134,11 +134,11 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-            _, out = model(img_batch)
+            _, model_out = model(img_batch)
             
             # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
-            out = F.normalize(out, dim=-1)
-            out = out @ out.T
+            model_out = F.normalize(model_out, dim=-1)
+            out = model_out @ model_out.T
 
             if args.supervised:
                 intra_class_mask = (labels.unsqueeze(-1) == labels.unsqueeze(0)).cuda().int()
@@ -236,15 +236,18 @@ def train(args):
                         vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
 
                         # visualize augmentations
-                        img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
-                        vis_dict = visualize_augmentations(vis_dict, img_batch)
+                        # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
+                        # vis_dict = visualize_augmentations(vis_dict, img_batch)
 
                         assert not model.training
                         vis_dict["val_acc_1_out"], vis_dict["val_acc_5_out"] = test_one_epoch(model, memory_loader, test_loader, feat=False)
                         model.eval()
 
                         # track positive/negative sample embedding similarities
-                        vis_dict = log_pos_neg_sample_embedding(args, vis_dict, out, labels)
+                        # vis_dict = log_pos_neg_sample_embedding(args, vis_dict, out, labels)
+
+                        # track the e'val of the feature covariance matrix
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps)
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1

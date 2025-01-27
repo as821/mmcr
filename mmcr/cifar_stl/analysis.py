@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import einops
 
 import pdb
+import numpy as np
 
 
 def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
@@ -173,4 +174,35 @@ def log_pos_neg_sample_embedding(args, vis_dict, out, labels):
         return vis_dict
 
 
+
+
+
+feat_cov_decomp_history = {}
+def visualize_feature_cov_decomp(vis_dict, out, step):
+    with torch.no_grad():
+        assert step not in feat_cov_decomp_history
+        feat_cov_decomp_history[step] = torch.linalg.eigvalsh(torch.cov(out.detach().T)).cpu() 
+
+        # Create a line plot for each eigenvalue over all steps
+        plt.figure(figsize=(10, 6))
+        steps = sorted(feat_cov_decomp_history.keys())
+        n_eigenvals = len(feat_cov_decomp_history[steps[0]])
+        eigenvals = np.zeros((len(steps), n_eigenvals))
+        for i, step in enumerate(steps):
+            eigenvals[i] = feat_cov_decomp_history[step].numpy()
+        
+        # Plot each eigenvalue as a separate line
+        for i in range(n_eigenvals):
+            plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
+        
+        plt.xlabel('Step')
+        plt.ylabel('Eigenvalue')
+        plt.title('Feature Covariance Matrix Eigenvalues')
+        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True)
+        plt.tight_layout()
+
+        vis_dict["feature_cov_eval"] = wandb.Image(plt)
+        plt.close()
+        return vis_dict
 
