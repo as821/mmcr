@@ -14,31 +14,18 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown, log_pos_neg_sample_embedding, visualize_feature_cov_decomp
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, visualize_feature_cov_decomp
 
 
 import pdb
 
-def calc_metrics(pred, target):
-    with torch.no_grad():
-        correct_mask = pred == target
-        positive_correct_mask = correct_mask & pred
-        total_correct = correct_mask.sum()
-        true_positive = positive_correct_mask.sum()
-        true_negative = total_correct - true_positive
-
-        incorrect_mask = ~correct_mask
-        positive_incorrect_mask = incorrect_mask & pred
-        total_incorrect = incorrect_mask.sum()
-        false_positive = positive_incorrect_mask.sum()
-        false_negative = total_incorrect - false_positive
-
-        accuracy = total_correct / pred.shape[0]
-        precision = true_positive / (true_positive + false_positive)
-        recall = true_positive / (true_positive + false_negative)
-        fpr = false_positive / (true_positive + false_positive)
-        fnr = false_negative / (true_negative + false_negative)
-        return accuracy, precision, recall, fpr, fnr
+def vis_dist(key_name, prefix, vis_dict, loss_dict):
+    foo = loss_dict[key_name]
+    vis_dict[prefix + "_min"] = foo.min()
+    vis_dict[prefix + "_max"] = foo.max()
+    vis_dict[prefix + "_mean"] = foo.mean()
+    vis_dict[prefix] = wandb.Histogram(foo)
+    return vis_dict
 
 def train(args):
     if args.wandb:
@@ -58,13 +45,6 @@ def train(args):
             "spectral_topk":args.spectral_topk
         }, project="mmcr", entity="cmu-slots-group")
 
-    def vis_dist(key_name, prefix, vis_dict, loss_dict):
-        foo = loss_dict[key_name]
-        vis_dict[prefix + "_min"] = foo.min()
-        vis_dict[prefix + "_max"] = foo.max()
-        vis_dict[prefix + "_mean"] = foo.mean()
-        vis_dict[prefix] = wandb.Histogram(foo)
-        return vis_dict
 
     torch.set_float32_matmul_precision('high')
 
@@ -116,7 +96,7 @@ def train(args):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
             feat, model_out = model(img_batch)
-            loss = loss_function(model_out)
+            loss, loss_dict = loss_function(model_out)
             
             # backward pass
             loss.backward()
@@ -130,7 +110,7 @@ def train(args):
             total_loss += loss.item() * data_tuple[0].size(0)
 
             train_bar.set_description(
-                "Train Epoch: [{}/{}] Loss: {:.1f}".format(
+                "Train Epoch: [{}/{}] Loss: {:.3f}".format(
                     epoch, args.epochs, loss.item()
                 )
             )
@@ -152,10 +132,7 @@ def train(args):
                         # visualize augmentations
                         # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
                         # vis_dict = visualize_augmentations(vis_dict, img_batch)
-
                         assert not model.training
-                        vis_dict["val_acc_1_out"], vis_dict["val_acc_5_out"] = test_one_epoch(model, memory_loader, test_loader, feat=False)
-                        model.eval()
 
                         # track the e'val of the feature covariance matrix
                         model_out = F.normalize(model_out, dim=-1)
@@ -175,7 +152,6 @@ def train(args):
                     model.train()
                     
                     total_loss, total_num, vis_dict = 0.0, 0, {}
-                    tot_pos, tot_neg, tot_inter, tot_intra, tot_intra_frac = 0, 0, 0, 0, 0
 
                     if epoch % args.save_freq == 0 or acc_1 == top_acc:
                         torch.save(
