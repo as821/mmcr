@@ -100,26 +100,7 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    tot_pos, tot_neg, tot_inter, tot_intra, tot_intra_frac = 0, 0, 0, 0, 0
-
-    target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
-    if args.pos_reweight:
-        npos = (args.n_aug * args.n_aug) * args.batch_size
-        nneg = (args.n_aug * args.batch_size) ** 2 - npos
-        if args.pos_weight > 0:
-            pos_weight = args.pos_weight
-        else:
-            pos_weight = nneg / npos
-            # pos_weight = args.batch_size - 1    # algebraically equiv. to above
-        
-        rescaler = (npos + nneg) / (npos * pos_weight + nneg)
-    elif args.neg_sample:
-        pos_weight = args.nneg_sample_mult
-        npos = (args.n_aug * args.n_aug) * args.batch_size
-        nneg = (args.n_aug * args.batch_size) ** 2 - npos
-        rescaler = (npos + nneg) / (npos * pos_weight + nneg)
-    else:
-        pos_weight = 1
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
@@ -134,54 +115,9 @@ def train(args):
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
-            _, model_out = model(img_batch)
+            feat, model_out = model(img_batch)
+            loss = loss_function(model_out)
             
-            # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
-            model_out = F.normalize(model_out, dim=-1)
-            out = model_out @ model_out.T
-
-            if args.supervised:
-                intra_class_mask = (labels.unsqueeze(-1) == labels.unsqueeze(0)).cuda().int()
-                target = torch.zeros((args.batch_size, args.batch_size, args.n_aug, args.n_aug), device="cuda", dtype=torch.float32)
-                target[:, :, :] = intra_class_mask.unsqueeze(-1).unsqueeze(-1)
-                target = einops.rearrange(target, "A C B D -> (A B) (C D)")
-
-
-            loss_mx = (target - out) ** 2
-            if args.pos_reweight:
-                mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
-                pos_loss = mx.diag()
-                loss = mx.sum(dim=-1)
-                neg_loss = loss - pos_loss
-                pos_loss *= pos_weight
-                
-                # normalize to account for the fact that we effectively just counted each positive example pos_weight times
-                # positive and negative samples should now have equal effect on the loss
-                loss = (pos_loss + neg_loss) * rescaler
-                loss = loss.mean()
-            elif args.neg_sample:
-                mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
-                pos_loss = mx.diag()
-                pos_loss *= pos_weight
-
-                out_mx = einops.rearrange(out, "(A B) (C D) -> A C (B D)", A=args.batch_size, C=args.batch_size).sum(dim=-1)
-
-                # ensure positive samples are never included in negative loss below
-                pos_idx = torch.arange(args.batch_size)
-                out_mx[pos_idx, pos_idx] = out_mx.max() + 1
-
-                # for each augmentation, find the nneg_sample_mult images who augmentation embeddings are least similar to this augmentation
-                assert args.nneg_sample_mult < (args.batch_size - 1)
-                easy_negative_indices = torch.topk(out_mx, args.nneg_sample_mult, dim=-1, largest=False, sorted=False)[1]
-
-                gather_mx = torch.gather(mx, 1, easy_negative_indices)
-                neg_loss = gather_mx.sum(dim=-1)
-
-                loss = (pos_loss + neg_loss) * rescaler
-                loss = loss.mean()
-            else:
-                loss = loss_mx.sum(dim=-1).mean()
-
             # backward pass
             loss.backward()
             if args.grad_clip > 0:
@@ -189,35 +125,13 @@ def train(args):
             optimizer.step()
             scheduler.step()
 
-            if args.neg_sample:
-                with torch.no_grad():
-                    pos_loss = pos_loss.sum()
-                    neg_loss = neg_loss.sum()
-
-                    # amount of intra/inter class loss and fraction of selected images that are intra class
-                    intra_class_mask = (labels.unsqueeze(-1) == labels.unsqueeze(0)).cuda().int()
-                    intra_class = mx * intra_class_mask
-                    intra_class = torch.gather(intra_class, 1, easy_negative_indices).sum()
-                    inter_class = neg_loss - intra_class
-
-                    intra_frac = torch.gather(intra_class_mask, 1, easy_negative_indices).sum() / (easy_negative_indices.shape[0] * easy_negative_indices.shape[1])
-                    tot_intra_frac += intra_frac / args.log_freq
-            else:
-                pos_loss, neg_loss, inter_class, intra_class = loss_breakdown(loss_mx, labels)
-
             # update the training bar
             total_num += data_tuple[0].size(0)
             total_loss += loss.item() * data_tuple[0].size(0)
 
-            tot_pos += pos_loss / args.log_freq
-            tot_neg += neg_loss / args.log_freq
-            tot_inter += inter_class / args.log_freq
-            tot_intra += intra_class / args.log_freq
-
-
             train_bar.set_description(
-                "Train Epoch: [{}/{}] Loss: {:.1f}, pos: {:.1f}, neg: {:.1f} inter: {:.1f} intra: {:.1f}".format(
-                    epoch, args.epochs, loss.item(), pos_loss.item(), neg_loss.item(), inter_class.item(), intra_class.item()
+                "Train Epoch: [{}/{}] Loss: {:.1f}".format(
+                    epoch, args.epochs, loss.item()
                 )
             )
             total_steps += 1
@@ -243,24 +157,17 @@ def train(args):
                         vis_dict["val_acc_1_out"], vis_dict["val_acc_5_out"] = test_one_epoch(model, memory_loader, test_loader, feat=False)
                         model.eval()
 
-                        # track positive/negative sample embedding similarities
-                        # vis_dict = log_pos_neg_sample_embedding(args, vis_dict, out, labels)
-
                         # track the e'val of the feature covariance matrix
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps)
+                        model_out = F.normalize(model_out, dim=-1)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, prefix="out")
+
+                        feat = F.normalize(feat, dim=-1)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps)
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
-
-                        vis_dict["pos_loss"] = tot_pos
-                        vis_dict["neg_loss"] = tot_neg
-                        vis_dict["inter_class_loss"] = tot_inter
-                        vis_dict["intra_class_loss"] = tot_intra
-                        if args.neg_sample:
-                            vis_dict["intra_class_frac"] = tot_intra_frac
-                        vis_dict["pos_weight"] = pos_weight
 
                         wandb.log(vis_dict, step=total_steps)
 

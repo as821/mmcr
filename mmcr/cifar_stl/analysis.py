@@ -178,7 +178,7 @@ def log_pos_neg_sample_embedding(args, vis_dict, out, labels):
 
 
 feat_cov_decomp_history = {}
-def visualize_feature_cov_decomp(vis_dict, out, step):
+def visualize_feature_cov_decomp(vis_dict, out, step, prefix="feature"):
     with torch.no_grad():
         assert step not in feat_cov_decomp_history
         feat_cov_decomp_history[step] = torch.linalg.eigvalsh(torch.cov(out.detach().T)).cpu() 
@@ -203,7 +203,7 @@ def visualize_feature_cov_decomp(vis_dict, out, step):
         plt.grid(True)
         plt.tight_layout()
 
-        vis_dict["feature_cov_eval"] = wandb.Image(plt)
+        vis_dict[prefix + "_cov_eval"] = wandb.Image(plt)
         plt.close()
         return vis_dict
 
