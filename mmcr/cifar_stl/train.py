@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
+from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue, GradientPreconditioning
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, visualize_feature_cov_decomp
 
 
@@ -82,6 +82,7 @@ def train(args):
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
     loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    preconditioner = GradientPreconditioning.apply
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
@@ -97,6 +98,8 @@ def train(args):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
             feat, model_out = model(img_batch)
+            if args.precond_alpha > 0:
+                model_out = preconditioner(model_out, args.precond_alpha)
             loss, loss_dict = loss_function(model_out)
             
             # backward pass
@@ -146,6 +149,7 @@ def train(args):
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
+                        vis_dict["precond_alpha"] = args.precond_alpha
 
                         wandb.log(vis_dict, step=total_steps)
 
