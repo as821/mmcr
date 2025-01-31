@@ -70,11 +70,12 @@ def train(args):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, fused=True)
 
-    warmup_iter = args.warmup_epoch * len(train_loader)
-    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_iter),
-        torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr)
-    ])
+    sched = []
+    if args.warmup_epoch > 0:
+        warmup_iter = args.warmup_epoch * len(train_loader)
+        sched.append(torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_iter))
+    sched.append(torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=args.final_lr))
+    scheduler = torch.optim.lr_scheduler.ChainedScheduler(sched)
 
     if args.wandb:
         wandb.watch(model, log_freq=10)
