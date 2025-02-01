@@ -178,18 +178,27 @@ def log_pos_neg_sample_embedding(args, vis_dict, out, labels):
 
 
 feat_cov_decomp_history = {}
-def visualize_feature_cov_decomp(vis_dict, out, step):
+def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature"):
+    pref = "centered_" if centered else "uncentered_"
+    prefix = pref + prefix
+    if prefix not in feat_cov_decomp_history:
+        feat_cov_decomp_history[prefix] = {}
     with torch.no_grad():
-        assert step not in feat_cov_decomp_history
-        feat_cov_decomp_history[step] = torch.linalg.eigvalsh(torch.cov(out.detach().T)).cpu() 
+        assert step not in feat_cov_decomp_history[prefix]
+
+        if centered:
+            cov = torch.cov(out.detach().T)
+        else:
+            cov = out.detach().T @ out.detach()
+        feat_cov_decomp_history[prefix][step] = torch.linalg.eigvalsh(cov).cpu() 
 
         # Create a line plot for each eigenvalue over all steps
         plt.figure(figsize=(10, 6))
-        steps = sorted(feat_cov_decomp_history.keys())
-        n_eigenvals = len(feat_cov_decomp_history[steps[0]])
+        steps = sorted(feat_cov_decomp_history[prefix].keys())
+        n_eigenvals = len(feat_cov_decomp_history[prefix][steps[0]])
         eigenvals = np.zeros((len(steps), n_eigenvals))
         for i, step in enumerate(steps):
-            eigenvals[i] = feat_cov_decomp_history[step].numpy()
+            eigenvals[i] = feat_cov_decomp_history[prefix][step].numpy()
         
         # Plot each eigenvalue as a separate line
         for i in range(n_eigenvals):
@@ -197,13 +206,14 @@ def visualize_feature_cov_decomp(vis_dict, out, step):
         
         plt.xlabel('Step')
         plt.ylabel('Eigenvalue')
-        plt.title('Feature Covariance Matrix Eigenvalues')
+        pref = "Centered " if centered else "Uncentered "
+        plt.title(pref + 'Feature Covariance Matrix Eigenvalues')
         # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.yscale('log')
         plt.grid(True)
         plt.tight_layout()
 
-        vis_dict["feature_cov_eval"] = wandb.Image(plt)
+        vis_dict[prefix + "_cov_eval"] = wandb.Image(plt)
         plt.close()
         return vis_dict
 

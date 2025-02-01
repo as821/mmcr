@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue
+from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue, GradientPreconditioning
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, loss_breakdown, log_pos_neg_sample_embedding, visualize_feature_cov_decomp
 
 
@@ -102,6 +102,7 @@ def train(args):
     total_loss, total_num, vis_dict = 0.0, 0, {}
     tot_pos, tot_neg, tot_inter, tot_intra, tot_intra_frac = 0, 0, 0, 0, 0
 
+    preconditioner = GradientPreconditioning.apply
     target = torch.block_diag(*[torch.ones((args.n_aug, args.n_aug)) for _ in range(args.batch_size)]).cuda()
     if args.pos_reweight:
         npos = (args.n_aug * args.n_aug) * args.batch_size
@@ -138,6 +139,8 @@ def train(args):
             
             # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
             model_out = F.normalize(model_out, dim=-1)
+            if args.precond_alpha > 0:
+                model_out = preconditioner(model_out, args.precond_alpha)
             out = model_out @ model_out.T
 
             if args.supervised:
@@ -247,7 +250,8 @@ def train(args):
                         # vis_dict = log_pos_neg_sample_embedding(args, vis_dict, out, labels)
 
                         # track the e'val of the feature covariance matrix
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, True, "out")
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, False, "out")
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1

@@ -6,6 +6,7 @@ import random
 from typing import Tuple
 
 import sys
+import pdb
 
 
 class BatchFIFOQueue():
@@ -31,6 +32,57 @@ class BatchFIFOQueue():
 
     def is_warm(self):
         return self.sz == self.n_batches
+
+
+class GradientPreconditioning(torch.autograd.Function):
+    """Custom autograd function for gradient preconditioning."""
+    
+    @staticmethod
+    def forward(ctx, embeddings, alpha):
+        """
+        Forward pass stores embeddings for backward pass.
+        Args:
+            embeddings: Tensor of shape (2n, d) containing the embeddings
+            alpha: Small positive constant for numerical stability
+        """
+        ctx.alpha = alpha
+        ctx.save_for_backward(embeddings)
+        return embeddings
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """
+        Implements the gradient preconditioning:
+        grad_new = grad_old @ (F^T F + alpha*I)^(-1)
+        
+        Args:
+            grad_output: Original gradient of shape (2n, d)
+        Returns:
+            Preconditioned gradient
+        """
+        embeddings, = ctx.saved_tensors
+        alpha = ctx.alpha
+        
+        # Compute F^T F
+        cov_matrix = torch.mm(embeddings.t(), embeddings)
+        
+        # Add alpha * I for stability
+        n_dim = cov_matrix.shape[0]
+        cov_matrix.add_(alpha * torch.eye(n_dim, device=cov_matrix.device))
+        
+        # Compute inverse
+        inv_cov = torch.linalg.inv(cov_matrix)
+        
+        # e_val = torch.linalg.eigvalsh(cov_matrix)
+        # print(f"{e_val.max()} {e_val.min()} {e_val.mean()}")
+
+
+        # Apply preconditioning: grad_new = grad_old @ (F^T F + alpha*I)^(-1)
+        preconditioned_grad = torch.mm(grad_output, inv_cov)
+        
+        # Return gradient for embeddings and None for alpha
+        return preconditioned_grad, None
+
 
 
 class MMCR_Loss(nn.Module):
