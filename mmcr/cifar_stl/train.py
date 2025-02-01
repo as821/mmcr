@@ -140,10 +140,12 @@ def train(args):
 
                         # track the e'val of the feature covariance matrix
                         model_out = F.normalize(model_out, dim=-1)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, prefix="out")
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, False, prefix="out")
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, True, prefix="out")
 
                         feat = F.normalize(feat, dim=-1)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps, False)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps, True)
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1

@@ -178,12 +178,19 @@ def log_pos_neg_sample_embedding(args, vis_dict, out, labels):
 
 
 feat_cov_decomp_history = {}
-def visualize_feature_cov_decomp(vis_dict, out, step, prefix="feature"):
+def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature"):
+    pref = "centered_" if centered else "uncentered_"
+    prefix = pref + prefix
     if prefix not in feat_cov_decomp_history:
         feat_cov_decomp_history[prefix] = {}
     with torch.no_grad():
         assert step not in feat_cov_decomp_history[prefix]
-        feat_cov_decomp_history[prefix][step] = torch.linalg.eigvalsh(torch.cov(out.detach().T)).cpu() 
+
+        if centered:
+            cov = torch.cov(out.detach().T)
+        else:
+            cov = out.detach().T @ out.detach()
+        feat_cov_decomp_history[prefix][step] = torch.linalg.eigvalsh(cov).cpu() 
 
         # Create a line plot for each eigenvalue over all steps
         plt.figure(figsize=(10, 6))
@@ -199,7 +206,8 @@ def visualize_feature_cov_decomp(vis_dict, out, step, prefix="feature"):
         
         plt.xlabel('Step')
         plt.ylabel('Eigenvalue')
-        plt.title('Feature Covariance Matrix Eigenvalues')
+        pref = "Centered " if centered else "Uncentered "
+        plt.title(pref + 'Feature Covariance Matrix Eigenvalues')
         # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.yscale('log')
         plt.grid(True)
