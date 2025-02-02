@@ -28,6 +28,7 @@ parser.add_argument("--pos_reweight", action="store_true")
 parser.add_argument("--pos_weight", type=float, default=0, help="zero to calculate parity with negative samples")
 parser.add_argument("--grad_clip", type=float, default=0)
 parser.add_argument("--precond_alpha", type=float, default=0)
+parser.add_argument("--precond_pow", type=float, default=0)
 
 parser.add_argument("--neg_sample", action="store_true")
 parser.add_argument("--nneg_sample_mult", type=int, default=40)
