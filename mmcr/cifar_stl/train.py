@@ -140,7 +140,7 @@ def train(args):
             # calculate outer product of outputs projected to the unit circle (inner product of each pair of features), O(N^2)
             model_out = F.normalize(model_out, dim=-1)
             if args.precond_alpha > 0:
-                model_out = preconditioner(model_out, args.precond_alpha, args.precond_thresh, args.precond_pow)
+                model_out = preconditioner(model_out, args.precond_alpha, args.precond_thresh, args.precond_pow, args.precond_center)
             out = model_out @ model_out.T
 
             if args.supervised:

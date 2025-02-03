@@ -38,7 +38,7 @@ class GradientPreconditioning(torch.autograd.Function):
     """Custom autograd function for gradient preconditioning."""
     
     @staticmethod
-    def forward(ctx, embeddings, alpha, thresh=-1, power=0):
+    def forward(ctx, embeddings, alpha, thresh=-1, power=0, centered=False):
         """
         Forward pass stores embeddings for backward pass.
         Args:
@@ -49,6 +49,7 @@ class GradientPreconditioning(torch.autograd.Function):
         ctx.save_for_backward(embeddings)
         ctx.power = power
         ctx.thresh = thresh
+        ctx.centered = centered
         return embeddings
 
     @staticmethod
@@ -67,8 +68,10 @@ class GradientPreconditioning(torch.autograd.Function):
         power = ctx.power
         thresh = ctx.thresh
         
-        # Compute F^T F
-        cov_matrix = torch.mm(embeddings.t(), embeddings)
+        if ctx.centered:
+            cov_matrix = torch.cov(embeddings.T)
+        else:
+            cov_matrix = torch.mm(embeddings.t(), embeddings)
         
         # Add alpha * I for stability
         n_dim = cov_matrix.shape[0]
@@ -97,7 +100,7 @@ class GradientPreconditioning(torch.autograd.Function):
         # Apply preconditioning: grad_new = grad_old @ (F^T F + alpha*I)^(-1)
         preconditioned_grad = torch.mm(grad_output, inv_cov)
         
-        return preconditioned_grad, None, None, None
+        return preconditioned_grad, None, None, None, None
 
 
 
