@@ -38,7 +38,7 @@ class GradientPreconditioning(torch.autograd.Function):
     """Custom autograd function for gradient preconditioning."""
     
     @staticmethod
-    def forward(ctx, embeddings, alpha, power=0):
+    def forward(ctx, embeddings, alpha, thresh=-1, power=0):
         """
         Forward pass stores embeddings for backward pass.
         Args:
@@ -48,6 +48,7 @@ class GradientPreconditioning(torch.autograd.Function):
         ctx.alpha = alpha
         ctx.save_for_backward(embeddings)
         ctx.power = power
+        ctx.thresh = thresh
         return embeddings
 
     @staticmethod
@@ -64,6 +65,7 @@ class GradientPreconditioning(torch.autograd.Function):
         embeddings, = ctx.saved_tensors
         alpha = ctx.alpha
         power = ctx.power
+        thresh = ctx.thresh
         
         # Compute F^T F
         cov_matrix = torch.mm(embeddings.t(), embeddings)
@@ -77,11 +79,17 @@ class GradientPreconditioning(torch.autograd.Function):
             eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
             powered_eigenvalues = eigenvalues.pow(power)
             inv_powered_eigenvalues = 1.0 / powered_eigenvalues
+            
+            if thresh > 0:
+                # apply a minimum scaling to all e'val (ex. set to 1 to only scale up e'vals and never scale down any of them)
+                inv_powered_eigenvalues = inv_powered_eigenvalues.clamp(thresh)
+            
             inv_cov = eigenvectors @ torch.diag(inv_powered_eigenvalues) @ eigenvectors.t()
             # print(f"({eigenvalues.max()} {eigenvalues.min()} {eigenvalues.mean()}) -> ({inv_powered_eigenvalues.max()} {inv_powered_eigenvalues.min()} {inv_powered_eigenvalues.mean()})")
         else:
             # Compute inverse
             inv_cov = torch.linalg.inv(cov_matrix)
+            assert thresh < 0
         
             # e_val = torch.linalg.eigvalsh(cov_matrix)
             # print(f"{e_val.max()} {e_val.min()} {e_val.mean()}")
@@ -89,8 +97,7 @@ class GradientPreconditioning(torch.autograd.Function):
         # Apply preconditioning: grad_new = grad_old @ (F^T F + alpha*I)^(-1)
         preconditioned_grad = torch.mm(grad_output, inv_cov)
         
-        # Return gradient for embeddings and None for alpha
-        return preconditioned_grad, None, None
+        return preconditioned_grad, None, None, None
 
 
 
