@@ -98,9 +98,9 @@ def train(args):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
             feat, model_out = model(img_batch)
-            if args.precond_alpha > 0:
-                model_out = preconditioner(model_out, args.precond_alpha)
-            loss, loss_dict = loss_function(model_out)
+            # if args.precond_alpha > 0:
+            #     model_out = preconditioner(model_out, args.precond_alpha, args.precond_thresh, args.precond_pow, args.precond_center)
+            loss, loss_dict = loss_function(model_out, args)
             
             # backward pass
             loss.backward()
