@@ -100,82 +100,6 @@ def visualize_augmentations(vis_dict, tensor):
     plt.close()
     return vis_dict
 
-def loss_breakdown(loss_mx, labels):
-    with torch.no_grad():
-        batch_sz = labels.shape[0]
-        loss_mx = einops.rearrange(loss_mx, "(A B) (C D) -> A C (B D)", A=batch_sz, C=batch_sz)
-        loss_mx = loss_mx.sum(dim=-1)
-
-        # breakdown loss by postive/negative samples
-        pos_loss = loss_mx.diag().sum()
-        loss_mx.fill_diagonal_(0)
-        neg_loss = loss_mx.sum()
-
-        # breakdown negative loss by inter/intra class
-        intra_class_mask = labels.unsqueeze(-1) == labels.unsqueeze(0)
-        intra_class = loss_mx[intra_class_mask].sum()
-        inter_class = loss_mx[~intra_class_mask].sum()
-
-    return pos_loss, neg_loss, inter_class, intra_class
-
-def log_pos_neg_sample_embedding(args, vis_dict, out, labels):
-    # Plot distribution of positive/negative sample embedding similarities
-    # NOTE: can be very slow, run infrequently
-    with torch.no_grad():
-        out_mx = einops.rearrange(out, "(A B) (C D) -> A C B D", A=args.batch_size, C=args.batch_size)
-        
-
-        # positive embeddding similarities (remove self-similarity)
-        pos_idx = torch.arange(out_mx.shape[0])
-        pos = out_mx[pos_idx, pos_idx, :]
-        mask = ~torch.eye(pos.shape[1], dtype=bool)
-        pos_no_diag = pos.permute((1, 2, 0))[mask].flatten().cpu().numpy()
-
-        plt.figure(figsize=(10, 6))
-        plt.hist(pos_no_diag, bins=50, edgecolor='black')
-        plt.title('Positive Sample Similarities')
-        plt.xlabel('Cosine Similarity')
-        plt.ylabel('Frequency')
-        vis_dict["pos_sim_hist"] = wandb.Image(plt)
-        plt.close()
-
-        # negative sample similarities
-        mask = ~torch.eye(out_mx.shape[0], dtype=bool)
-        neg = out_mx[mask]
-        plt.figure(figsize=(10, 6))
-        plt.hist(neg.cpu().numpy().flatten(), bins=50, edgecolor='black')
-        plt.title('Negative Sample Similarities')
-        plt.xlabel('Cosine Similarity')
-        plt.ylabel('Frequency')
-        vis_dict["neg_sim_hist"] = wandb.Image(plt)
-        plt.close()
-
-        # inter/intra class similarities
-        intra_class_mask = labels.unsqueeze(-1) == labels.unsqueeze(0)
-        intra = out_mx[intra_class_mask & mask]
-        inter = out_mx[~intra_class_mask & mask]
-
-        plt.figure(figsize=(10, 6))
-        plt.hist(intra.cpu().numpy().flatten(), bins=50, edgecolor='black')
-        plt.title('(Intra) Negative Sample Similarities')
-        plt.xlabel('Cosine Similarity')
-        plt.ylabel('Frequency')
-        vis_dict["neg_intra_sim_hist"] = wandb.Image(plt)
-        plt.close()
-
-        plt.figure(figsize=(10, 6))
-        plt.hist(inter.cpu().numpy().flatten(), bins=50, edgecolor='black')
-        plt.title('(Inter) Negative Sample Similarities')
-        plt.xlabel('Cosine Similarity')
-        plt.ylabel('Frequency')
-        vis_dict["neg_inter_sim_hist"] = wandb.Image(plt)
-        plt.close()
-
-        return vis_dict
-
-
-
-
 
 feat_cov_decomp_history = {}
 def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature"):
@@ -217,3 +141,63 @@ def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature"
         plt.close()
         return vis_dict
 
+
+
+history = {}
+def visualize_vector_time_series(vis_dict, out, step, prefix=""):
+    if prefix not in history:
+        history[prefix] = {}
+    with torch.no_grad():
+        assert step not in history[prefix]
+        history[prefix][step] = out.detach().cpu() 
+
+        # Create a line plot for each eigenvalue over all steps
+        plt.figure(figsize=(10, 6))
+        steps = sorted(history[prefix].keys())
+        n_eigenvals = len(history[prefix][steps[0]])
+        eigenvals = np.zeros((len(steps), n_eigenvals))
+        for i, step in enumerate(steps):
+            eigenvals[i] = history[prefix][step].numpy()
+        
+        # Plot each eigenvalue as a separate line
+        for i in range(n_eigenvals):
+            plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
+        
+        plt.xlabel('Step')
+        plt.ylabel('Value')
+        plt.title(prefix + ' Time Series')
+        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.yscale('log')
+        plt.grid(True)
+        plt.tight_layout()
+
+        vis_dict[prefix + "_time_series"] = wandb.Image(plt)
+        plt.close()
+        return vis_dict
+
+
+def visualize_centoid_sing_val_stats(vis_dict, step, centroids, sing_vals):
+    # plot number and stats of non-zero centroid covariance e'vals
+    cov_matrix = centroids.T @ centroids
+    evals = torch.linalg.eigvalsh(cov_matrix)
+    nz_evals = evals[evals > 1e-4]
+    vis_dict["centroid_eval_nnz"] = nz_evals.shape[0]
+    vis_dict["centroid_eval_mean"] = nz_evals.mean()
+    vis_dict["centroid_eval_var"] = nz_evals.var()
+
+    plt.figure(figsize=(10, 6))
+    plt.imshow(cov_matrix, cmap='coolwarm', aspect='equal')
+    plt.colorbar()
+    plt.title('Centroid Covariance')
+    vis_dict["centroid_cov_mx"] = wandb.Image(plt)
+    plt.close()
+
+    # plot centroid norms
+    cnorms = torch.linalg.norm(centroids, dim=1)
+    vis_dict = visualize_vector_time_series(vis_dict, cnorms, step, "centroid_norm")
+
+    # singular value stats
+    vis_dict["sing_val_mean"] = sing_vals.mean()
+    vis_dict["sing_val_mean"] = sing_vals.var()
+
+    return vis_dict

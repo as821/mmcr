@@ -14,7 +14,7 @@ from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue, GradientPreconditioning
-from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, visualize_feature_cov_decomp
+from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, visualize_feature_cov_decomp, visualize_vector_time_series, visualize_centoid_sing_val_stats
 
 
 import pdb
@@ -98,6 +98,11 @@ def train(args):
             img_batch, labels = data_tuple
             img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
             feat, model_out = model(img_batch)
+            
+            # TODO: stupid that torch compile needs this for vis to work
+            model_out_vis = model_out.detach().clone()
+            feat_vis = feat.detach().clone()
+            
             # if args.precond_alpha > 0:
             #     model_out = preconditioner(model_out, args.precond_alpha, args.precond_thresh, args.precond_pow, args.precond_center)
             loss, loss_dict = loss_function(model_out, args)
@@ -139,13 +144,19 @@ def train(args):
                         assert not model.training
 
                         # track the e'val of the feature covariance matrix
-                        model_out = F.normalize(model_out, dim=-1)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, False, prefix="out")
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, True, prefix="out")
+                        model_out_vis = F.normalize(model_out_vis, dim=-1)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out_vis, total_steps, False, prefix="out")
+                        # vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, True, prefix="out")
 
-                        feat = F.normalize(feat, dim=-1)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps, False)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps, True)
+                        feat_vis = F.normalize(feat_vis, dim=-1)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat_vis, total_steps, False)
+                        # vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps, True)
+
+                        # plot evolution of centroid pre/post conditioner covariance and global singular values
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond")
+                        vis_dict = visualize_vector_time_series(vis_dict, loss_dict["global_sing_vals"], total_steps, prefix="global_sing_vals")
+
+                        vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"])
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1

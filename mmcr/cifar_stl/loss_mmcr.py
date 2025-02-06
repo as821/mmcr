@@ -138,7 +138,9 @@ class MMCR_Loss(nn.Module):
             z_local = z_local_
 
         centroids = torch.mean(z_local, dim=-1)
-        
+
+        centroids_pre_condition = centroids.detach().cpu()
+
         if args.precond_alpha > 0:
             centroids = GradientPreconditioning.apply(centroids, args.precond_alpha, args.precond_thresh, args.precond_pow, args.precond_center)
 
@@ -176,7 +178,9 @@ class MMCR_Loss(nn.Module):
             "loss": loss.item(),
             "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
-            "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
+            "global_sing_vals" : global_sing_vals.detach().cpu(), 
+            "centroid_post_conditioner" : centroids.detach().cpu(),
+            "centroid_pre_conditioner" : centroids_pre_condition
         }
 
         self.first_time = False
