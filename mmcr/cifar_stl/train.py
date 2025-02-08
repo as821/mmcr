@@ -84,6 +84,9 @@ def train(args):
     loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
     preconditioner = GradientPreconditioning.apply
 
+    plot_freq = 1500
+    assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
+
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")
     top_acc, total_steps = 0.0, 0
@@ -143,20 +146,20 @@ def train(args):
                         # vis_dict = visualize_augmentations(vis_dict, img_batch)
                         assert not model.training
 
+                        plot = total_steps % plot_freq == 0
+
                         # track the e'val of the feature covariance matrix
                         model_out_vis = F.normalize(model_out_vis, dim=-1)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out_vis, total_steps, False, prefix="out")
-                        # vis_dict = visualize_feature_cov_decomp(vis_dict, model_out, total_steps, True, prefix="out")
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot)
 
                         feat_vis = F.normalize(feat_vis, dim=-1)
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat_vis, total_steps, False)
-                        # vis_dict = visualize_feature_cov_decomp(vis_dict, feat, total_steps, True)
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, feat_vis, total_steps, False, plot=plot)
 
                         # plot evolution of centroid pre/post conditioner covariance and global singular values
-                        vis_dict = visualize_feature_cov_decomp(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond")
-                        vis_dict = visualize_vector_time_series(vis_dict, loss_dict["global_sing_vals"], total_steps, prefix="global_sing_vals")
+                        vis_dict = visualize_feature_cov_decomp(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot)
+                        vis_dict = visualize_vector_time_series(vis_dict, loss_dict["global_sing_vals"], total_steps, prefix="global_sing_vals", plot=plot)
 
-                        vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"])
+                        vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"], plot=plot)
 
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1

@@ -102,7 +102,7 @@ def visualize_augmentations(vis_dict, tensor):
 
 
 feat_cov_decomp_history = {}
-def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature"):
+def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature", plot=True):
     pref = "centered_" if centered else "uncentered_"
     prefix = pref + prefix
     if prefix not in feat_cov_decomp_history:
@@ -116,67 +116,69 @@ def visualize_feature_cov_decomp(vis_dict, out, step, centered, prefix="feature"
             cov = out.detach().T @ out.detach()
         feat_cov_decomp_history[prefix][step] = torch.linalg.eigvalsh(cov).cpu() 
 
-        # Create a line plot for each eigenvalue over all steps
-        plt.figure(figsize=(10, 6))
-        steps = sorted(feat_cov_decomp_history[prefix].keys())
-        n_eigenvals = len(feat_cov_decomp_history[prefix][steps[0]])
-        eigenvals = np.zeros((len(steps), n_eigenvals))
-        for i, step in enumerate(steps):
-            eigenvals[i] = feat_cov_decomp_history[prefix][step].numpy()
-        
-        # Plot each eigenvalue as a separate line
-        for i in range(n_eigenvals):
-            plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
-        
-        plt.xlabel('Step')
-        plt.ylabel('Eigenvalue')
-        pref = "Centered " if centered else "Uncentered "
-        plt.title(pref + 'Feature Covariance Matrix Eigenvalues')
-        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.yscale('log')
-        plt.grid(True)
-        plt.tight_layout()
+        if plot:
+            # Create a line plot for each eigenvalue over all steps
+            plt.figure(figsize=(10, 6))
+            steps = sorted(feat_cov_decomp_history[prefix].keys())
+            n_eigenvals = len(feat_cov_decomp_history[prefix][steps[0]])
+            eigenvals = np.zeros((len(steps), n_eigenvals))
+            for i, step in enumerate(steps):
+                eigenvals[i] = feat_cov_decomp_history[prefix][step].numpy()
+            
+            # Plot each eigenvalue as a separate line
+            for i in range(n_eigenvals):
+                plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
+            
+            plt.xlabel('Step')
+            plt.ylabel('Eigenvalue')
+            pref = "Centered " if centered else "Uncentered "
+            plt.title(pref + 'Feature Covariance Matrix Eigenvalues')
+            # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.yscale('log')
+            plt.grid(True)
+            plt.tight_layout()
 
-        vis_dict[prefix + "_cov_eval"] = wandb.Image(plt)
-        plt.close()
+            vis_dict[prefix + "_cov_eval"] = wandb.Image(plt)
+            plt.close()
         return vis_dict
 
 
 
 history = {}
-def visualize_vector_time_series(vis_dict, out, step, prefix=""):
+def visualize_vector_time_series(vis_dict, out, step, prefix="", plot=True):
     if prefix not in history:
         history[prefix] = {}
     with torch.no_grad():
         assert step not in history[prefix]
         history[prefix][step] = out.detach().cpu() 
 
-        # Create a line plot for each eigenvalue over all steps
-        plt.figure(figsize=(10, 6))
-        steps = sorted(history[prefix].keys())
-        n_eigenvals = len(history[prefix][steps[0]])
-        eigenvals = np.zeros((len(steps), n_eigenvals))
-        for i, step in enumerate(steps):
-            eigenvals[i] = history[prefix][step].numpy()
-        
-        # Plot each eigenvalue as a separate line
-        for i in range(n_eigenvals):
-            plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
-        
-        plt.xlabel('Step')
-        plt.ylabel('Value')
-        plt.title(prefix + ' Time Series')
-        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.yscale('log')
-        plt.grid(True)
-        plt.tight_layout()
+        if plot:
+            # Create a line plot for each eigenvalue over all steps
+            plt.figure(figsize=(10, 6))
+            steps = sorted(history[prefix].keys())
+            n_eigenvals = len(history[prefix][steps[0]])
+            eigenvals = np.zeros((len(steps), n_eigenvals))
+            for i, step in enumerate(steps):
+                eigenvals[i] = history[prefix][step].numpy()
+            
+            # Plot each eigenvalue as a separate line
+            for i in range(n_eigenvals):
+                plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
+            
+            plt.xlabel('Step')
+            plt.ylabel('Value')
+            plt.title(prefix + ' Time Series')
+            # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.yscale('log')
+            plt.grid(True)
+            plt.tight_layout()
 
-        vis_dict[prefix + "_time_series"] = wandb.Image(plt)
-        plt.close()
+            vis_dict[prefix + "_time_series"] = wandb.Image(plt)
+            plt.close()
         return vis_dict
 
 
-def visualize_centoid_sing_val_stats(vis_dict, step, centroids, sing_vals):
+def visualize_centoid_sing_val_stats(vis_dict, step, centroids, sing_vals, plot=True):
     # plot number and stats of non-zero centroid covariance e'vals
     cov_matrix = centroids.T @ centroids
     evals = torch.linalg.eigvalsh(cov_matrix)
@@ -185,16 +187,17 @@ def visualize_centoid_sing_val_stats(vis_dict, step, centroids, sing_vals):
     vis_dict["centroid_eval_mean"] = nz_evals.mean()
     vis_dict["centroid_eval_var"] = nz_evals.var()
 
-    plt.figure(figsize=(10, 6))
-    plt.imshow(cov_matrix, cmap='coolwarm', aspect='equal')
-    plt.colorbar()
-    plt.title('Centroid Covariance')
-    vis_dict["centroid_cov_mx"] = wandb.Image(plt)
-    plt.close()
+    if plot:
+        plt.figure(figsize=(10, 6))
+        plt.imshow(cov_matrix, cmap='coolwarm', aspect='equal')
+        plt.colorbar()
+        plt.title('Centroid Covariance')
+        vis_dict["centroid_cov_mx"] = wandb.Image(plt)
+        plt.close()
 
     # plot centroid norms
     cnorms = torch.linalg.norm(centroids, dim=1)
-    vis_dict = visualize_vector_time_series(vis_dict, cnorms, step, "centroid_norm")
+    vis_dict = visualize_vector_time_series(vis_dict, cnorms, step, "centroid_norm", plot)
 
     # singular value stats
     vis_dict["sing_val_mean"] = sing_vals.mean()
