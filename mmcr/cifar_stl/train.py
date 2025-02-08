@@ -81,8 +81,7 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
-    preconditioner = GradientPreconditioning.apply
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
 
     model = model.cuda()
     model = torch.compile(model, mode="max-autotune")

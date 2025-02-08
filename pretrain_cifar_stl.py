@@ -48,6 +48,9 @@ parser.add_argument("--spectral_topk", action="store_true")
 parser.add_argument("--diffusion_aug", action="store_true")
 parser.add_argument("--diff_alpha", type=float, default=0.01)
 
+parser.add_argument("--huber", action="store_true")
+
+
 args = parser.parse_args()
 
 # submitit job management
