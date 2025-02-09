@@ -104,7 +104,7 @@ class GradientPreconditioning(torch.autograd.Function):
         return preconditioned_grad, None, None, None, None
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, huber=False):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, huber=False, huber_pow=0):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
@@ -114,6 +114,7 @@ class MMCR_Loss(nn.Module):
         self.spectral_target = spectral_target
         self.spectral_topk = spectral_topk
         self.huber = huber
+        self.huber_pow = huber_pow
 
         self.memory_bank = memory_bank
 
@@ -170,8 +171,12 @@ class MMCR_Loss(nn.Module):
             sorted_values, _ = torch.sort(global_sing_vals, descending=True)
             global_nuc = sorted_values[:10].sum() - sorted_values[10:].sum()
         elif self.huber:
-            # pdb.set_trace()
+            # basically SmoothL1Loss
             global_nuc = torch.nn.functional.huber_loss(global_sing_vals, torch.zeros_like(global_sing_vals), reduction="sum", delta=1.0)
+        elif self.huber_pow != 0:
+            # apply a monomial of the given power in a similar fashion to the Huber loss (to values <1, else L1)
+            global_nuc = global_sing_vals[global_sing_vals >= 1].sum()
+            global_nuc += (global_sing_vals[global_sing_vals < 1] ** self.huber_pow).sum()
         else:
             global_nuc = global_sing_vals.sum()
 

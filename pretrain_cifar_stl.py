@@ -49,7 +49,7 @@ parser.add_argument("--diffusion_aug", action="store_true")
 parser.add_argument("--diff_alpha", type=float, default=0.01)
 
 parser.add_argument("--huber", action="store_true")
-
+parser.add_argument("--huber_pow", type=float, default=0.0)
 
 args = parser.parse_args()
 
