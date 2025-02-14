@@ -81,7 +81,7 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, sv_pow=args.sv_pow, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
 
     plot_freq = 1500
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0

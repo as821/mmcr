@@ -104,7 +104,7 @@ class GradientPreconditioning(torch.autograd.Function):
         return preconditioned_grad, None, None, None, None
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, huber=False, huber_pow=0):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, huber=False, huber_pow=0, sv_pow=0):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
@@ -115,6 +115,7 @@ class MMCR_Loss(nn.Module):
         self.spectral_topk = spectral_topk
         self.huber = huber
         self.huber_pow = huber_pow
+        self.sv_pow = sv_pow
 
         self.memory_bank = memory_bank
 
@@ -177,6 +178,8 @@ class MMCR_Loss(nn.Module):
             # apply a monomial of the given power in a similar fashion to the Huber loss (to values <1, else L1)
             global_nuc = global_sing_vals[global_sing_vals >= 1].sum()
             global_nuc += (global_sing_vals[global_sing_vals < 1] ** self.huber_pow).sum()
+        elif self.sv_pow != 0:
+            global_nuc = (global_sing_vals ** self.sv_pow).sum()
         else:
             global_nuc = global_sing_vals.sum()
 
