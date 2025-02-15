@@ -204,3 +204,60 @@ def visualize_centoid_sing_val_stats(vis_dict, step, centroids, sing_vals, plot=
     vis_dict["sing_val_mean"] = sing_vals.var()
 
     return vis_dict
+
+
+cov_evec_decomp_history = {}
+def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=True):
+    pref = "centered_" if centered else "uncentered_"
+    prefix = pref + prefix
+    if prefix not in cov_evec_decomp_history:
+        cov_evec_decomp_history[prefix] = [{}, None]
+    with torch.no_grad():
+        assert step not in cov_evec_decomp_history[prefix][0]
+
+        if centered:
+            cov = torch.cov(out.detach().T)
+        else:
+            cov = out.detach().T @ out.detach()
+        
+        # NOTE: evec are sorted from smallest -> largest e'val   
+        _, cur_evec = torch.linalg.eigh(cov)
+        cur_evec = cur_evec.cpu()
+
+        prev_evec = cov_evec_decomp_history[prefix][1]
+        if prev_evec is not None:
+            # evec are the columns --> rows of sim are the sim between a given e'vec and all evec of prev_evec
+            sim = cur_evec.T @ prev_evec
+            
+            # NOTE: probably a better way to do this, probably want unique assignments
+            # cosine sim with closest prev evec (potentially have duplicates -> 2+ cur evec have the same "closest" prev evec)
+            cov_evec_decomp_history[prefix][0][step] = torch.max(sim, dim=1)[0]
+
+            # TODO: might be interesting to plot indices as well?
+
+            if plot:
+                # Create a line plot for each eigenvalue over all steps
+                plt.figure(figsize=(10, 6))
+                steps = sorted(cov_evec_decomp_history[prefix][0].keys())
+                n_eigenvals = len(cov_evec_decomp_history[prefix][0][steps[0]])
+                eigenvals = np.zeros((len(steps), n_eigenvals))
+                for i, step in enumerate(steps):
+                    eigenvals[i] = cov_evec_decomp_history[prefix][0][step].numpy()
+                
+                # Plot each eigenvector as a separate line
+                for i in range(n_eigenvals):
+                    plt.plot(steps, eigenvals[:, i]) #, label=f'λ{i+1}')
+                
+                plt.xlabel('Step')
+                plt.ylabel("E'vec Cosine Sim. With Closest E'vec From Prior Step")
+                pref = "Centered " if centered else "Uncentered "
+                plt.title(pref + 'Feature Covariance Matrix Eigenvector Evolution')
+                # plt.yscale('log')
+                plt.grid(True)
+                plt.tight_layout()
+
+                vis_dict[prefix + "_cov_evec"] = wandb.Image(plt)
+                plt.close()
+        
+        cov_evec_decomp_history[prefix][1] = cur_evec
+        return vis_dict
