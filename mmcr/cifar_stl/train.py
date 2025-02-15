@@ -127,6 +127,15 @@ def train(args):
             )
             total_steps += 1
 
+
+            plot = total_steps % plot_freq == 0
+            with torch.no_grad():
+                model_out_vis = F.normalize(model_out_vis, dim=-1)
+                feat_vis = F.normalize(feat_vis, dim=-1)
+                vis_dict = visualize_cov_evec(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot)
+                vis_dict = visualize_cov_evec(vis_dict, feat_vis, total_steps, False, plot=plot)
+                vis_dict = visualize_cov_evec(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot)
+
             if total_steps % args.log_freq == 0:
                 with torch.no_grad():
                     model.eval()
@@ -145,20 +154,15 @@ def train(args):
                         # vis_dict = visualize_augmentations(vis_dict, img_batch)
                         assert not model.training
 
-                        plot = total_steps % plot_freq == 0
 
                         # track the e'val of the feature covariance matrix
-                        model_out_vis = F.normalize(model_out_vis, dim=-1)
                         vis_dict = visualize_feature_cov_decomp(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot)
-                        vis_dict = visualize_cov_evec(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot)
 
-                        feat_vis = F.normalize(feat_vis, dim=-1)
                         vis_dict = visualize_feature_cov_decomp(vis_dict, feat_vis, total_steps, False, plot=plot)
-                        vis_dict = visualize_cov_evec(vis_dict, feat_vis, total_steps, False, plot=plot)
+
 
                         # plot evolution of centroid pre/post conditioner covariance and global singular values
                         vis_dict = visualize_feature_cov_decomp(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot)
-                        vis_dict = visualize_cov_evec(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot)
                         vis_dict = visualize_vector_time_series(vis_dict, loss_dict["global_sing_vals"], total_steps, prefix="global_sing_vals", plot=plot)
 
                         vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"], plot=plot)

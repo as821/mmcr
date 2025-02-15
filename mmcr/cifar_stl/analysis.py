@@ -255,9 +255,36 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
                 # plt.yscale('log')
                 plt.grid(True)
                 plt.tight_layout()
-
                 vis_dict[prefix + "_cov_evec"] = wandb.Image(plt)
                 plt.close()
+
+                if prefix == "uncentered_out":
+                    # plot top 20 e'val (sorted smallest -> largest by eval)
+                    plt.figure(figsize=(10, 6))
+                    for i in range(20):
+                        plt.plot(steps, eigenvals[:, i], label=f'λ {i}')
+                    plt.xlabel('Step')
+                    plt.ylabel("Top E'vec Cosine Sim. With Closest E'vec From Prior Step")
+                    pref = "Centered " if centered else "Uncentered "
+                    plt.title(pref + 'Feature Covariance Matrix Eigenvector Evolution')
+                    plt.grid(True)
+                    plt.tight_layout()
+                    vis_dict[prefix + "_small_cov_evec"] = wandb.Image(plt)
+                    plt.close() 
+
+                    # plot bottom 20 e'val (sorted smallest -> largest by eval)
+                    plt.figure(figsize=(10, 6))
+                    for i in range(1, 20, 1):
+                        plt.plot(steps, eigenvals[:, -1 * i], label=f'λ -{i}')
+                    plt.xlabel('Step')
+                    plt.ylabel("Bottom E'vec Cosine Sim. With Closest E'vec From Prior Step")
+                    pref = "Centered " if centered else "Uncentered "
+                    plt.title(pref + 'Feature Covariance Matrix Eigenvector Evolution')
+                    plt.grid(True)
+                    plt.tight_layout()
+                    vis_dict[prefix + "_large_cov_evec"] = wandb.Image(plt)
+                    plt.close() 
+
         
         cov_evec_decomp_history[prefix][1] = cur_evec
         return vis_dict
