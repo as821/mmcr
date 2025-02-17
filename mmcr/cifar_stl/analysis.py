@@ -207,7 +207,7 @@ def visualize_centoid_sing_val_stats(vis_dict, step, centroids, sing_vals, plot=
 
 
 cov_evec_decomp_history = {}
-def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=True):
+def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=True, handle_inverted_evec=False):
     pref = "centered_" if centered else "uncentered_"
     prefix = pref + prefix
     if prefix not in cov_evec_decomp_history:
@@ -229,6 +229,10 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
             # evec are the columns --> rows of sim are the sim between a given e'vec and all evec of prev_evec
             sim = cur_evec.T @ prev_evec
             
+            # NOTE: cosine similarity \in [-1, 1]. high negative cosin
+            if handle_inverted_evec:
+                sim = torch.abs(sim)
+
             # NOTE: probably a better way to do this, probably want unique assignments
             # cosine sim with closest prev evec (potentially have duplicates -> 2+ cur evec have the same "closest" prev evec)
             cov_evec_decomp_history[prefix][0][step] = torch.max(sim, dim=1)[0]
@@ -261,7 +265,7 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
                 if prefix == "uncentered_out":
                     # plot top 20 e'val (sorted smallest -> largest by eval)
                     plt.figure(figsize=(10, 6))
-                    for i in range(20):
+                    for i in range(10):
                         plt.plot(steps, eigenvals[:, i], label=f'λ {i}')
                     plt.xlabel('Step')
                     plt.ylabel("Top E'vec Cosine Sim. With Closest E'vec From Prior Step")
@@ -274,7 +278,7 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
 
                     # plot bottom 20 e'val (sorted smallest -> largest by eval)
                     plt.figure(figsize=(10, 6))
-                    for i in range(1, 20, 1):
+                    for i in range(1, 11, 1):
                         plt.plot(steps, eigenvals[:, -1 * i], label=f'λ -{i}')
                     plt.xlabel('Step')
                     plt.ylabel("Bottom E'vec Cosine Sim. With Closest E'vec From Prior Step")
