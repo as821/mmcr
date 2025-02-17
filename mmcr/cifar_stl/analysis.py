@@ -74,6 +74,9 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
 
 def visualize_augmentations(vis_dict, tensor):
     N, B, C, H, W = tensor.shape
+    N = min(N, 5)
+    B = min(B, 10)
+    
     
     # Create a figure with N rows and B columns
     fig, axes = plt.subplots(N, B, figsize=(20, 20))
