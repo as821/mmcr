@@ -12,9 +12,10 @@ import torch
 
 import random
 from PIL import Image, ImageOps, ImageFilter
+from torch.utils.data import Dataset
 
 
-def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, **kwargs):
+def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, batch_sz=-1, **kwargs):
     data_dir = "./datasets/"
     if dataset == "stl10":
         train_split = "train" if supervised else "train+unlabeled"
@@ -310,3 +311,26 @@ class CifarBatchTransform:
             return y
         else:
             return self.transform(x)
+
+
+
+class DummyDataset(Dataset):
+    def __init__(self, root, train, transform, download, batch_sz):
+        self.dataset = torchvision.datasets.CIFAR10(
+            root=root,
+            train=train,
+            transform=transform,
+            download=download,
+        )
+        self.batch_sz = batch_sz
+
+    def __len__(self):
+        return self.batch_sz
+    
+    def __getitem__(self, idx):
+        if idx > self.batch_sz:
+            raise NotImplementedError
+        
+        if torch.is_tensor(idx):
+            idx = idx.tolist()    
+        return self.dataset[idx]

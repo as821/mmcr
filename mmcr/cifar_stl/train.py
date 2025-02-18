@@ -49,9 +49,9 @@ def train(args):
     torch.set_float32_matmul_precision('high')
 
     train_dataset, memory_dataset, test_dataset = get_datasets(
-        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug
+        dataset=args.dataset, n_aug=args.n_aug, strong_aug=args.stronger_aug, diffusion_aug=args.diffusion_aug, weak_aug=args.weak_aug, strongest_aug=args.strongest_aug, batch_sz=args.batch_size
     )
-    model = Model(projector_dims=[512, 128], dataset=args.dataset)
+    model = Model(projector_dims=[512, args.out_dim], dataset=args.dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True #, prefetch_factor=4, persistent_workers=True
     )
@@ -132,9 +132,11 @@ def train(args):
             with torch.no_grad():
                 model_out_vis = F.normalize(model_out_vis, dim=-1)
                 feat_vis = F.normalize(feat_vis, dim=-1)
-                vis_dict = visualize_cov_evec(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot)
-                vis_dict = visualize_cov_evec(vis_dict, feat_vis, total_steps, False, plot=plot)
-                vis_dict = visualize_cov_evec(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot)
+                vis_dict = visualize_cov_evec(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot, handle_inverted_evec=True)
+                vis_dict = visualize_cov_evec(vis_dict, feat_vis, total_steps, False, plot=plot, handle_inverted_evec=True)
+                vis_dict = visualize_cov_evec(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot, handle_inverted_evec=True)
+
+                # TODO: plot the movement of the per-image centroids as well
 
             if total_steps % args.log_freq == 0:
                 with torch.no_grad():
@@ -167,6 +169,7 @@ def train(args):
 
                         vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"], plot=plot)
 
+                        vis_dict["out_cov_cond_num"] = torch.linalg.cond(model_out_vis.detach().T @ model_out_vis.detach())
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5

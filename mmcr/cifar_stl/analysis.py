@@ -10,13 +10,13 @@ import pdb
 import numpy as np
 
 
-def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat):
+def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_dim):
     prefix = "feat_" if use_feat else "out_"
     with torch.no_grad():        
         # 100 samples from the augmentation manfiolds of 500 images in the CIFAR-10
         data, target = data_tuple
 
-        sz = 512 if use_feat else 128
+        sz = 512 if use_feat else out_dim
         features = torch.zeros((data.shape[0], data.shape[1], sz), dtype=data.dtype, device="cuda")
         centroids = torch.zeros((data.shape[0], sz), dtype=data.dtype, device="cuda")
         aug_centroid_sim = torch.zeros((data.shape[0], data.shape[1]), device="cpu")
@@ -221,7 +221,7 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
             cov = out.detach().T @ out.detach()
         
         # NOTE: evec are sorted from smallest -> largest e'val   
-        _, cur_evec = torch.linalg.eigh(cov)
+        cur_eval, cur_evec = torch.linalg.eigh(cov)
         cur_evec = cur_evec.cpu()
 
         prev_evec = cov_evec_decomp_history[prefix][1]
@@ -238,6 +238,14 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
             cov_evec_decomp_history[prefix][0][step] = torch.max(sim, dim=1)[0]
 
             # TODO: might be interesting to plot indices as well?
+
+            # if prefix == "uncentered_out":
+            #     foo = torch.max(sim, dim=1)[0]
+            #     amin = foo.argmin()
+            #     amax = foo.argmax()
+            #     print(f"{foo.min().item():.3f} ({amin.item()}, {cur_eval[amin].item():.3f})\t{foo.max().item():.3f} ({amax.item()}, {cur_eval[amax].item():.3f})\t{torch.linalg.cond(cov)}")
+            #     # pdb.set_trace()
+
 
             if plot:
                 # Create a line plot for each eigenvalue over all steps

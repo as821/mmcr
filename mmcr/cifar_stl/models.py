@@ -26,7 +26,7 @@ class Projector(nn.Module):
         return self.g(torch.concat([x, y], dim=-1))
 
 class Model(nn.Module):
-    def __init__(self, projector_dims: list = [512, 128], dataset: str = "cifar10"):
+    def __init__(self, projector_dims, dataset):
         super(Model, self).__init__()
 
         self.f = []
@@ -49,11 +49,11 @@ class Model(nn.Module):
         layers = []
         for i in range(len(projector_dims) - 2):
             layers.append(
-                nn.Linear(projector_dims[i], projector_dims[i + 1], bias=True)
+                nn.Linear(projector_dims[i], projector_dims[i + 1], bias=False)
             )
             layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
             layers.append(nn.ReLU())
-        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=True))
+        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:

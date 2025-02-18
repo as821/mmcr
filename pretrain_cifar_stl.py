@@ -52,6 +52,8 @@ parser.add_argument("--huber", action="store_true")
 parser.add_argument("--huber_pow", type=float, default=0.0)
 parser.add_argument("--sv_pow", type=float, default=0.0)
 
+parser.add_argument("--out_dim", type=int, default=128)
+
 args = parser.parse_args()
 
 # submitit job management
