@@ -148,8 +148,8 @@ def train(args):
 
                     if args.wandb:
                         # check manifold subspace alignment 
-                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False)
-                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True)
+                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False, args.out_dim)
+                        vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, True, args.out_dim)
 
                         # visualize augmentations
                         # img_batch = einops.rearrange(img_batch.detach().cpu(), "(B N) C H W -> B N C H W", B=args.batch_size)
