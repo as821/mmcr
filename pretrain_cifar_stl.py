@@ -51,6 +51,8 @@ parser.add_argument("--diff_alpha", type=float, default=0.01)
 parser.add_argument("--huber", action="store_true")
 parser.add_argument("--huber_pow", type=float, default=0.0)
 parser.add_argument("--sv_pow", type=float, default=0.0)
+parser.add_argument("--centroid_dropout_prob", type=float, default=0.0)
+parser.add_argument("--pca_dropout", type=float, default=0.0)
 
 parser.add_argument("--out_dim", type=int, default=128)
 

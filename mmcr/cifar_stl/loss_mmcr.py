@@ -104,7 +104,7 @@ class GradientPreconditioning(torch.autograd.Function):
         return preconditioned_grad, None, None, None, None
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, huber=False, huber_pow=0, sv_pow=0):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, huber=False, huber_pow=0, sv_pow=0, centroid_dropout_prob=0, pca_dropout=0):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
@@ -116,6 +116,8 @@ class MMCR_Loss(nn.Module):
         self.huber = huber
         self.huber_pow = huber_pow
         self.sv_pow = sv_pow
+        self.centroid_dropout_prob = centroid_dropout_prob
+        self.pca_dropout = pca_dropout
 
         self.memory_bank = memory_bank
 
@@ -140,6 +142,27 @@ class MMCR_Loss(nn.Module):
         else:
             z_local = z_local_
 
+        if self.pca_dropout != 0:
+            # TODO: drop out random principal components
+
+            # calculate principal component vectors
+            local = einops.rearrange(z_local, "A B C -> (A C) B")
+            cov = local.T @ local
+            evl, evec = torch.linalg.eigh(cov)
+            
+            # drop out on principal component weights for each image
+            l_weight = local @ evec
+            
+            # drop out principal components
+            l_weight = l_weight * torch.empty(l_weight.shape, device=l_weight.device).bernoulli_(1-self.pca_dropout)
+
+            # reconstruct (evec @ evec.T == I)
+            z_local = einops.rearrange(l_weight @ evec.T, "(A C) B -> A B C", A=z_local.shape[0])
+
+            
+
+
+
         centroids = torch.mean(z_local, dim=-1)
 
         centroids_pre_condition = centroids.detach().cpu()
@@ -160,6 +183,11 @@ class MMCR_Loss(nn.Module):
             local_nuc = torch.linalg.svdvals(z_local).sum()
         else:
             local_nuc = torch.tensor(0.0)
+
+        if self.centroid_dropout_prob != 0:
+            # like dropout without the scaling
+            centroids = centroids * torch.empty(centroids.shape, device=centroids.device).bernoulli_(1-self.centroid_dropout_prob)
+
         global_sing_vals = torch.linalg.svdvals(centroids)
         
         if self.l2_spectral_norm:
