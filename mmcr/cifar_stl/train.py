@@ -145,6 +145,8 @@ def train(args):
                     if acc_1 > top_acc:
                         top_acc = acc_1
                     model.eval()
+                    out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
+                    model.eval()                    
 
                     if args.wandb:
                         # check manifold subspace alignment 
@@ -173,6 +175,8 @@ def train(args):
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
+                        vis_dict["out_acc_1"] = out_acc_1
+                        vis_dict["out_acc_5"] = out_acc_5
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
                         vis_dict["precond_alpha"] = args.precond_alpha
 
