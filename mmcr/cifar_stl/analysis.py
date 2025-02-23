@@ -225,12 +225,10 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
         
         # NOTE: evec are sorted from smallest -> largest e'val   
         cur_eval, cur_evec = torch.linalg.eigh(cov)
-        cur_evec = cur_evec.cpu()
-
         prev_evec = cov_evec_decomp_history[prefix][1]
         if prev_evec is not None:
             # evec are the columns --> rows of sim are the sim between a given e'vec and all evec of prev_evec
-            sim = cur_evec.T @ prev_evec
+            sim = cur_evec.T @ prev_evec.cuda()
             
             # NOTE: cosine similarity \in [-1, 1]. high negative cosin
             if handle_inverted_evec:
@@ -238,7 +236,7 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
 
             # NOTE: probably a better way to do this, probably want unique assignments
             # cosine sim with closest prev evec (potentially have duplicates -> 2+ cur evec have the same "closest" prev evec)
-            cov_evec_decomp_history[prefix][0][step] = torch.max(sim, dim=1)[0]
+            cov_evec_decomp_history[prefix][0][step] = torch.max(sim, dim=1)[0].cpu()
 
             # TODO: might be interesting to plot indices as well?
 
@@ -301,5 +299,5 @@ def visualize_cov_evec(vis_dict, out, step, centered, prefix="feature", plot=Tru
                     plt.close() 
 
         
-        cov_evec_decomp_history[prefix][1] = cur_evec
+        cov_evec_decomp_history[prefix][1] = cur_evec.cpu()
         return vis_dict

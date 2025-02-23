@@ -98,13 +98,13 @@ def train(args):
             # forward pass
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
-            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)
+            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)            
             feat, model_out = model(img_batch)
             
             # TODO: stupid that torch compile needs this for vis to work
             model_out_vis = model_out.detach().clone()
             feat_vis = feat.detach().clone()
-            
+
             # if args.precond_alpha > 0:
             #     model_out = preconditioner(model_out, args.precond_alpha, args.precond_thresh, args.precond_pow, args.precond_center)
             loss, loss_dict = loss_function(model_out, args)
@@ -134,7 +134,7 @@ def train(args):
                 feat_vis = F.normalize(feat_vis, dim=-1)
                 vis_dict = visualize_cov_evec(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot, handle_inverted_evec=True)
                 vis_dict = visualize_cov_evec(vis_dict, feat_vis, total_steps, False, plot=plot, handle_inverted_evec=True)
-                vis_dict = visualize_cov_evec(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot, handle_inverted_evec=True)
+                # vis_dict = visualize_cov_evec(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot, handle_inverted_evec=True)
 
                 # TODO: plot the movement of the per-image centroids as well
 
