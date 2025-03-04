@@ -6,6 +6,10 @@ from torch import Tensor
 from typing import Tuple
 
 
+from mmcr.cifar_stl.vision_transformer import vit_tiny
+
+import pdb
+
 
 class Projector(nn.Module):
     def __init__(self):
@@ -29,23 +33,25 @@ class Model(nn.Module):
     def __init__(self, projector_dims, dataset):
         super(Model, self).__init__()
 
-        self.f = []
-        for name, module in resnet18().named_children():
-            if name == "conv1":
-                module = nn.Conv2d(
-                    3, 64, kernel_size=3, stride=1, padding=1, bias=False
-                )
-            if dataset == "cifar10" or "cifar100":
-                if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
-                    self.f.append(module)
-            elif dataset == "stl10":
-                if not isinstance(module, nn.Linear):
-                    self.f.append(module)
-        # encoder
-        self.f = nn.Sequential(*self.f)
+        # self.f = []
+        # for name, module in resnet18().named_children():
+        #     if name == "conv1":
+        #         module = nn.Conv2d(
+        #             3, 64, kernel_size=3, stride=1, padding=1, bias=False
+        #         )
+        #     if dataset == "cifar10" or "cifar100":
+        #         if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
+        #             self.f.append(module)
+        #     elif dataset == "stl10":
+        #         if not isinstance(module, nn.Linear):
+        #             self.f.append(module)
+        # # encoder
+        # self.f = nn.Sequential(*self.f)
+
+        self.f = vit_tiny(patch_size=4, enable_cls=True)
 
         # projection head (Following exactly barlow twins offical repo)
-        projector_dims = [512] + projector_dims
+        projector_dims = [192] + projector_dims
         layers = []
         for i in range(len(projector_dims) - 2):
             layers.append(
@@ -56,8 +62,13 @@ class Model(nn.Module):
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
 
+        # TODO: try the DINO projection head as well
+
+
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
-        x = self.f(x)
-        feature = torch.flatten(x, start_dim=1)
+        # pdb.set_trace()
+        feature = self.f(x)
+        # pdb.set_trace()
+        # feature = torch.flatten(x, start_dim=1)
         out = self.g(feature)
         return feature, out
