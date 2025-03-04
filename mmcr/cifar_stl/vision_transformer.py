@@ -138,14 +138,19 @@ class Block(nn.Module):
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
+    def __init__(self, img_size=224, patch_size=16, patch_stride=16, in_chans=3, embed_dim=768):
         super().__init__()
-        num_patches = (img_size // patch_size) * (img_size // patch_size)
         self.img_size = img_size
         self.patch_size = patch_size
-        self.num_patches = num_patches
+        self.patch_stride = patch_stride
 
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_stride)
+        
+        # num_patches = (img_size // patch_size) * (img_size // patch_size)
+        with torch.no_grad():
+            tmp = torch.zeros((in_chans, img_size, img_size))
+            shp = self.proj(tmp).shape
+            self.num_patches = shp[1] * shp[2]
 
     def forward(self, x):
         B, C, H, W = x.shape
@@ -155,14 +160,18 @@ class PatchEmbed(nn.Module):
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer """
-    def __init__(self, img_size=[32], patch_size=16, in_chans=3, embed_dim=768, depth=12,
+    def __init__(self, img_size=[32], patch_size=16, patch_stride=0, in_chans=3, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, enable_cls=False, **kwargs):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
 
+        if patch_stride <= 0:
+            patch_stride = patch_size
+        self.patch_stride = patch_stride
+
         self.patch_embed = PatchEmbed(
-            img_size=img_size[0], patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+            img_size=img_size[0], patch_size=patch_size, patch_stride=self.patch_stride, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
         self.enable_cls = enable_cls

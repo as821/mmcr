@@ -87,7 +87,7 @@ def train(args):
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
 
     model = model.cuda()
-    model = torch.compile(model, mode="max-autotune")
+    # model = torch.compile(model, mode="max-autotune")
     top_acc, total_steps = 0.0, 0
     for epoch in range(args.epochs):
         model.train()

@@ -16,7 +16,7 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_
         # 100 samples from the augmentation manfiolds of 500 images in the CIFAR-10
         data, target = data_tuple
 
-        sz = 512 if use_feat else out_dim
+        sz = 192 if use_feat else out_dim
         features = torch.zeros((data.shape[0], data.shape[1], sz), dtype=data.dtype, device="cuda")
         centroids = torch.zeros((data.shape[0], sz), dtype=data.dtype, device="cuda")
         aug_centroid_sim = torch.zeros((data.shape[0], data.shape[1]), device="cpu")

@@ -48,7 +48,11 @@ class Model(nn.Module):
         # # encoder
         # self.f = nn.Sequential(*self.f)
 
-        self.f = vit_tiny(patch_size=4, enable_cls=True)
+        use_cls_token = True
+        if use_cls_token:
+            self.f = vit_tiny(patch_size=4, enable_cls=True)
+        else:
+            self.f = vit_tiny(patch_size=4)
 
         # projection head (Following exactly barlow twins offical repo)
         projector_dims = [192] + projector_dims
@@ -68,7 +72,5 @@ class Model(nn.Module):
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         # pdb.set_trace()
         feature = self.f(x)
-        # pdb.set_trace()
-        # feature = torch.flatten(x, start_dim=1)
         out = self.g(feature)
         return feature, out
