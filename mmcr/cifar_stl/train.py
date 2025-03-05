@@ -13,8 +13,9 @@ import torch.nn.functional as F
 from mmcr.cifar_stl.data import get_datasets, CifarBatchTransform
 from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
-from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue, GradientPreconditioning
+from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, VICReg_Loss, BatchFIFOQueue, GradientPreconditioning
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, visualize_feature_cov_decomp, visualize_vector_time_series, visualize_centoid_sing_val_stats, visualize_cov_evec
+from mmcr.cifar_stl.train_linear_classifier import train_classifier_model
 
 
 import pdb
@@ -82,6 +83,7 @@ def train(args):
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
     loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, sv_pow=args.sv_pow, centroid_dropout_prob=args.centroid_dropout_prob, pca_dropout=args.pca_dropout, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    # loss_function = VICReg_Loss()
 
     plot_freq = 1500
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
@@ -141,12 +143,14 @@ def train(args):
             if total_steps % args.log_freq == 0:
                 with torch.no_grad():
                     model.eval()
-                    acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
-                    if acc_1 > top_acc:
-                        top_acc = acc_1
+                    knn_acc_1, knn_acc_5 = test_one_epoch(model, memory_loader, test_loader)
                     model.eval()
-                    out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
-                    model.eval()                    
+                    # _, probe_acc_1 = train_classifier_model(model.f)
+                    # if probe_acc_1 > top_acc:
+                    #     top_acc = probe_acc_1
+                    # model.eval()
+                    # out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
+                    # model.eval()                    
 
                     if args.wandb:
                         # check manifold subspace alignment 
@@ -171,10 +175,9 @@ def train(args):
 
                         vis_dict["out_cov_cond_num"] = torch.linalg.cond(model_out_vis.detach().T @ model_out_vis.detach())
                         vis_dict["train_loss"] = total_loss / total_num
-                        vis_dict["val_acc_1"] = acc_1
-                        vis_dict["val_acc_5"] = acc_5
-                        vis_dict["out_acc_1"] = out_acc_1
-                        vis_dict["out_acc_5"] = out_acc_5
+                        vis_dict["val_acc_1"] = knn_acc_1
+                        vis_dict["val_acc_5"] = knn_acc_5
+                        # vis_dict["probe_acc_1"] = probe_acc_1
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
                         vis_dict["precond_alpha"] = args.precond_alpha
 
@@ -185,11 +188,8 @@ def train(args):
                     
                     total_loss, total_num, vis_dict = 0.0, 0, {}
 
-                    if epoch % args.save_freq == 0 or acc_1 == top_acc:
-                        torch.save(
-                            model.state_dict(),
-                            f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",
-                        )
+                    # if epoch % args.save_freq == 0 or probe_acc_1 == top_acc:
+                    #     torch.save(model.state_dict(), f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth")
 
     if args.wandb:
         wandb.finish()

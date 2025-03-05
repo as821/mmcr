@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import einops
 import random
 from typing import Tuple
-
+import math
 import sys
 import pdb
 
@@ -125,104 +125,81 @@ class MMCR_Loss(nn.Module):
         # print(f"{z.max()} {z.min()}")
         
         z = F.normalize(z, dim=-1)
-        z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
-
-        # gather across devices into list
-        if self.distributed:
-            z_list = [
-                torch.zeros_like(z_local_)
-                for i in range(torch.distributed.get_world_size())
-            ]
-            torch.distributed.all_gather(z_list, z_local_, async_op=False)
-            z_list[torch.distributed.get_rank()] = z_local_
-
-            # append all
-            z_local = torch.cat(z_list)
-
-        else:
-            z_local = z_local_
-
-        if self.pca_dropout != 0:
-            # TODO: drop out random principal components
-
-            # calculate principal component vectors
-            local = einops.rearrange(z_local, "A B C -> (A C) B")
-            cov = local.T @ local
-            evl, evec = torch.linalg.eigh(cov)
-            
-            # drop out on principal component weights for each image
-            l_weight = local @ evec
-            
-            # drop out principal components
-            l_weight = l_weight * torch.empty(l_weight.shape, device=l_weight.device).bernoulli_(1-self.pca_dropout)
-
-            # reconstruct (evec @ evec.T == I)
-            z_local = einops.rearrange(l_weight @ evec.T, "(A C) B -> A B C", A=z_local.shape[0])
-
-            
-
+        # z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
+        z_local = einops.rearrange(z, "B N C -> B C N")
 
 
         centroids = torch.mean(z_local, dim=-1)
-
         centroids_pre_condition = centroids.detach().cpu()
-
-        if args.precond_alpha > 0:
-            centroids = GradientPreconditioning.apply(centroids, args.precond_alpha, args.precond_thresh, args.precond_pow, args.precond_center)
-
-        # print(f"{z.max()} {z.min()} {centroids.max()} {centroids.min()}")
-        # print(f"{torch.linalg.cond(centroids)}")
-
-        if self.memory_bank is not None:
-            curr_centroids = centroids.detach()
-            if self.memory_bank.is_warm():
-                centroids = torch.cat([self.memory_bank.buf.detach(), centroids])
-            self.memory_bank.enqueue(curr_centroids)
-
-        if self.lmbda != 0.0:
-            local_nuc = torch.linalg.svdvals(z_local).sum()
-        else:
-            local_nuc = torch.tensor(0.0)
-
-        if self.centroid_dropout_prob != 0:
-            # like dropout without the scaling
-            centroids = centroids * torch.empty(centroids.shape, device=centroids.device).bernoulli_(1-self.centroid_dropout_prob)
 
         global_sing_vals = torch.linalg.svdvals(centroids)
         
-        if self.l2_spectral_norm:
-            global_nuc = torch.linalg.vector_norm(global_sing_vals)
-        elif self.spectral_target:
-            # we want to minimize distance between singular values and 1, but further down this term is mult by -1. Counteract that here
-            global_nuc = (global_sing_vals - 1).sum()
-        elif self.spectral_topk:
-            # maximize the value of the num. class largest values, minimize the rest
-            sorted_values, _ = torch.sort(global_sing_vals, descending=True)
-            global_nuc = sorted_values[:10].sum() - sorted_values[10:].sum()
-        elif self.huber:
-            # basically SmoothL1Loss
-            global_nuc = torch.nn.functional.huber_loss(global_sing_vals, torch.zeros_like(global_sing_vals), reduction="sum", delta=1.0)
-        elif self.huber_pow != 0:
-            # apply a monomial of the given power in a similar fashion to the Huber loss (to values <1, else L1)
-            global_nuc = global_sing_vals[global_sing_vals >= 1].sum()
-            global_nuc += (global_sing_vals[global_sing_vals < 1] ** self.huber_pow).sum()
-        elif self.sv_pow != 0:
-            global_nuc = (global_sing_vals ** self.sv_pow).sum()
-        else:
-            global_nuc = global_sing_vals.sum()
+        global_nuc = global_sing_vals.sum()
 
         batch_size = z_local.shape[0]
-        loss = self.lmbda * local_nuc / batch_size - global_nuc
+        loss = -1 * global_nuc
 
         loss_dict = {
             "loss": loss.item(),
-            "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
             "global_sing_vals" : global_sing_vals.detach().cpu(), 
             "centroid_post_conditioner" : centroids.detach().cpu(),
             "centroid_pre_conditioner" : centroids_pre_condition
         }
+        return loss, loss_dict
 
-        self.first_time = False
 
+
+
+
+class VICReg_Loss(nn.Module):
+    def __init__(self, sim_coeff=25, std_coeff=25, cov_coeff=1):
+        super(VICReg_Loss, self).__init__()
+        self.sim_coeff = sim_coeff
+        self.std_coeff = std_coeff
+        self.cov_coeff = cov_coeff
+
+    # def calc_neighbor_similarity(self, z):
+        # calculate patch neighbor similarity 
+        # n_patches = z.shape
+        # n_patch_per_dim = int(math.sqrt(n_patches))
+        # assert n_patch_per_dim ** 2 == n_patches
+        # einops.rearrange(z, "A (B C) D -> A B C D", B=n_patch_per_dim)
+
+        # treats all patches in the image as neighbors
+        # patch_mean = z.mean(dim=1)
+        # return F.mse_loss(z, patch_mean)
+
+    def forward(self, z: Tensor, args) -> Tuple[Tensor, dict]:
+        batch_sz, n_features = z.shape[0], z.shape[-1]
+        # z = F.normalize(z, dim=-1)
+
+        # sim_loss = self.calc_neighbor_similarity(z)
+        patch_mean = z.mean(dim=1).unsqueeze(1).repeat(1, z.shape[1], 1)
+        sim_loss = F.mse_loss(z, patch_mean)
+        
+        # calculate the variance losses using the 
+        z = torch.flatten(z, start_dim=0, end_dim=1)
+        z = z - z.mean(dim=0)
+        std_z = torch.sqrt(z.var(dim=0) + 0.0001)
+        std_loss = torch.mean(F.relu(1 - std_z))
+        
+
+        def off_diagonal(x):
+            n, m = x.shape
+            assert n == m
+            return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+        
+        cov_z = (z.T @ z) / (batch_sz - 1)
+        cov_loss = off_diagonal(cov_z).pow_(2).sum().div(n_features)
+        loss = self.sim_coeff * sim_loss + self.std_coeff * std_loss + self.cov_coeff * cov_loss
+
+        print(f"\t{loss}: {sim_loss} {std_loss} {cov_loss}")
+
+        loss_dict = {
+            "loss" : loss.item(),
+            "sim_loss" : sim_loss.item(),
+            "std_loss" : std_loss.item(),
+            "cov_loss" : cov_loss.item()
+        }
         return loss, loss_dict
