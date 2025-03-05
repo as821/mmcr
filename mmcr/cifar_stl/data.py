@@ -9,10 +9,25 @@ import torchvision
 import torchvision.transforms.functional as TF
 from torchvision.datasets import CIFAR10
 import torch
+import einops
 
 import random
 from PIL import Image, ImageOps, ImageFilter
 from torch.utils.data import Dataset
+
+import pdb
+
+def calc_patch_stats(patch_sz, stride):
+    # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
+    data_dir = "./datasets/"
+    train_data = torchvision.datasets.CIFAR10(root=data_dir, train=True, transform=transforms.transforms.ToTensor(), download=True)    
+    
+    data = torch.from_numpy(train_data.data).to(torch.float32) / 255
+    data = data.permute((0, 3, 1, 2))
+
+    patches = torch.nn.functional.unfold(data, patch_sz, stride=stride)
+    patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
+    return patches.mean(dim=1), patches.std(dim=1)
 
 
 def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, batch_sz=-1, **kwargs):
@@ -44,17 +59,22 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
             download=False,
         )
     elif dataset == "cifar10":
+        # calculates pixel-level statistics given the patching strategy to be used
+        mean, std = calc_patch_stats(24, 1)
+        
         train_data = torchvision.datasets.CIFAR10(
             root=data_dir,
             train=True,
             transform=CifarBatchTransform(
-                train_transform=True,
-                batch_transform=batch_transform,
+                train_transform=False,
+                batch_transform=None,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
                 strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
+                mean=mean,
+                std=std,
                 **kwargs,
             ),
             download=True,
@@ -70,6 +90,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
+                mean=mean,
+                std=std,
                 **kwargs,
             ),
             download=True,
@@ -85,6 +107,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
+                mean=mean,
+                std=std,
                 **kwargs,
             ),
             download=True,
@@ -221,6 +245,8 @@ class CifarBatchTransform:
         diffusion_aug=False,
         weak_aug=False,
         strongest_aug=False,
+        mean=[0.4914, 0.4822, 0.4465],
+        std=[0.2023, 0.1994, 0.2010],
         **kwargs,
     ):
         if train_transform:
@@ -235,9 +261,7 @@ class CifarBatchTransform:
                     GaussianBlur(0.5),
                     Solarization(0.2),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             elif strongest_aug:
                 lst_of_transform = [
@@ -250,27 +274,21 @@ class CifarBatchTransform:
                     GaussianBlur(0.75),
                     Solarization(0.5),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             elif weak_aug:
                 lst_of_transform = [
                     transforms.RandomResizedCrop(32, scale=(0.3, 1)),
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]                
             elif diffusion_aug:
                 lst_of_transform = [
                     transforms.RandomResizedCrop(32),
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             else:
                 lst_of_transform = [
@@ -281,9 +299,7 @@ class CifarBatchTransform:
                     ),
                     transforms.RandomGrayscale(p=0.2),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
 
             self.transform = transforms.Compose(lst_of_transform)
@@ -291,9 +307,7 @@ class CifarBatchTransform:
             self.transform = transforms.Compose(
                 [
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             )
         self.n_transform = n_transform
@@ -312,25 +326,3 @@ class CifarBatchTransform:
         else:
             return self.transform(x)
 
-
-
-class DummyDataset(Dataset):
-    def __init__(self, root, train, transform, download, batch_sz):
-        self.dataset = torchvision.datasets.CIFAR10(
-            root=root,
-            train=train,
-            transform=transform,
-            download=download,
-        )
-        self.batch_sz = batch_sz
-
-    def __len__(self):
-        return self.batch_sz
-    
-    def __getitem__(self, idx):
-        if idx > self.batch_sz:
-            raise NotImplementedError
-        
-        if torch.is_tensor(idx):
-            idx = idx.tolist()    
-        return self.dataset[idx]

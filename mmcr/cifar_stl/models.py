@@ -6,28 +6,10 @@ from torch import Tensor
 from typing import Tuple
 
 
-from mmcr.cifar_stl.vision_transformer import vit_tiny
+from mmcr.cifar_stl.vision_transformer import vit_tiny, trunc_normal_
 
 import pdb
 
-
-class Projector(nn.Module):
-    def __init__(self):
-        super(Projector, self).__init__()
-        projector_dims = [1024, 256, 1]
-        layers = []
-        for i in range(len(projector_dims) - 2):
-            layers.append(
-                nn.Linear(projector_dims[i], projector_dims[i + 1], bias=False)
-            )
-            layers.append(nn.BatchNorm1d(projector_dims[i + 1]))
-            layers.append(nn.ReLU())
-        layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
-        
-        self.g = nn.Sequential(*layers)
-
-    def forward(self, x, y):
-        return self.g(torch.concat([x, y], dim=-1))
 
 class Model(nn.Module):
     def __init__(self, projector_dims, dataset):
@@ -52,7 +34,7 @@ class Model(nn.Module):
         if self.use_cls_token:
             self.f = vit_tiny(patch_size=4, enable_cls=True)
         else:
-            self.f = vit_tiny(patch_size=8)
+            self.f = vit_tiny(patch_size=24, patch_stride=1)
 
         # projection head (Following exactly barlow twins offical repo)
         projector_dims = [192] + projector_dims
@@ -65,9 +47,17 @@ class Model(nn.Module):
             layers.append(nn.ReLU())
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
+        
+        # self.g.apply(self._init_weights)
 
         # TODO: try the DINO projection head as well
 
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         if self.use_cls_token:

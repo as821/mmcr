@@ -160,7 +160,7 @@ class PatchEmbed(nn.Module):
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer """
-    def __init__(self, img_size=[32], patch_size=16, patch_stride=0, in_chans=3, embed_dim=768, depth=12,
+    def __init__(self, img_size=32, patch_size=16, patch_stride=0, in_chans=3, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, enable_cls=False, **kwargs):
         super().__init__()
@@ -170,14 +170,13 @@ class VisionTransformer(nn.Module):
             patch_stride = patch_size
         self.patch_stride = patch_stride
 
-        self.patch_embed = PatchEmbed(
-            img_size=img_size[0], patch_size=patch_size, patch_stride=self.patch_stride, in_chans=in_chans, embed_dim=embed_dim)
+        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, patch_stride=self.patch_stride, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
         self.enable_cls = enable_cls
         if enable_cls:
             self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-            trunc_normal_(self.cls_token, std=.02)
+            # trunc_normal_(self.cls_token, std=.02)
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         else:
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
@@ -191,24 +190,24 @@ class VisionTransformer(nn.Module):
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
-        trunc_normal_(self.pos_embed, std=.02)
-        self.apply(self._init_weights)
+    #     trunc_normal_(self.pos_embed, std=.02)
+    #     self.apply(self._init_weights)
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+    # def _init_weights(self, m):
+    #     if isinstance(m, nn.Linear):
+    #         trunc_normal_(m.weight, std=.02)
+    #         if isinstance(m, nn.Linear) and m.bias is not None:
+    #             nn.init.constant_(m.bias, 0)
+    #     elif isinstance(m, nn.LayerNorm):
+    #         nn.init.constant_(m.bias, 0)
+    #         nn.init.constant_(m.weight, 1.0)
 
     def interpolate_pos_encoding(self, x, w, h):
         npatch = x.shape[1] - 1
         if self.enable_cls:
             N = self.pos_embed.shape[1] - 1
         else:
-            N = self.pos_embed.shape[1] - 1
+            N = self.pos_embed.shape[1]
         if npatch == N and w == h:
             return self.pos_embed
         
@@ -233,7 +232,7 @@ class VisionTransformer(nn.Module):
         if self.enable_cls:
             return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
         else:
-            return class_pos_embed
+            return patch_pos_embed
 
     def prepare_tokens(self, x):
         B, nc, w, h = x.shape

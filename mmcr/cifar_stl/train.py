@@ -82,8 +82,8 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, sv_pow=args.sv_pow, centroid_dropout_prob=args.centroid_dropout_prob, pca_dropout=args.pca_dropout, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
-    # loss_function = VICReg_Loss()
+    # loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, sv_pow=args.sv_pow, centroid_dropout_prob=args.centroid_dropout_prob, pca_dropout=args.pca_dropout, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    loss_function = VICReg_Loss()
 
     plot_freq = 1500
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
@@ -100,7 +100,8 @@ def train(args):
             # forward pass
             # with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             img_batch, labels = data_tuple
-            img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W").cuda(non_blocking=True)            
+            # img_batch = einops.rearrange(img_batch, "B N C H W -> (B N) C H W")
+            img_batch = img_batch.cuda(non_blocking=True)            
             feat, model_out = model(img_batch)
             
             # TODO: stupid that torch compile needs this for vis to work

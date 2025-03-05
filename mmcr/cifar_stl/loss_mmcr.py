@@ -126,25 +126,31 @@ class MMCR_Loss(nn.Module):
         
         z = F.normalize(z, dim=-1)
         # z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
-        z_local = einops.rearrange(z, "B N C -> B C N")
+        n_patch_per_dim = int(math.sqrt(z.shape[1]))
+        assert n_patch_per_dim ** 2 == z.shape[1]
+        z_local = einops.rearrange(z, "B (A D) C -> B C A D", A=n_patch_per_dim)
+
+        n_neighbors = 3
+        neighborhood = torch.nn.functional.unfold(z_local, n_neighbors)
+
+        # undo some of the flattening unfold did and rearrange so neighbor dimension is last
+        neighborhood = einops.rearrange(neighborhood, "A (B C) D -> A B C D", B=z.shape[-1])
+        neighborhood = einops.rearrange(neighborhood, "A B C D -> A D B C", B=z.shape[-1])
+        
+        centroids = torch.mean(neighborhood, dim=-1)
+        centroids = torch.flatten(centroids, start_dim=0, end_dim=1)
 
 
-        centroids = torch.mean(z_local, dim=-1)
-        centroids_pre_condition = centroids.detach().cpu()
-
+        # centroids = torch.mean(z_local, dim=-1)
         global_sing_vals = torch.linalg.svdvals(centroids)
         
         global_nuc = global_sing_vals.sum()
-
-        batch_size = z_local.shape[0]
         loss = -1 * global_nuc
 
         loss_dict = {
             "loss": loss.item(),
             "global_nuc": global_nuc.item(),
             "global_sing_vals" : global_sing_vals.detach().cpu(), 
-            "centroid_post_conditioner" : centroids.detach().cpu(),
-            "centroid_pre_conditioner" : centroids_pre_condition
         }
         return loss, loss_dict
 
@@ -172,14 +178,39 @@ class VICReg_Loss(nn.Module):
 
     def forward(self, z: Tensor, args) -> Tuple[Tensor, dict]:
         batch_sz, n_features = z.shape[0], z.shape[-1]
-        # z = F.normalize(z, dim=-1)
 
         # sim_loss = self.calc_neighbor_similarity(z)
-        patch_mean = z.mean(dim=1).unsqueeze(1).repeat(1, z.shape[1], 1)
-        sim_loss = F.mse_loss(z, patch_mean)
+        # patch_mean = z.mean(dim=1).unsqueeze(1).repeat(1, z.shape[1], 1)
+        # sim_loss = F.mse_loss(z, patch_mean)
+
+
+        # TODO: why is this not a good enough learning signal?? why is this so easy?
+
+        mean = z.mean(dim=1).unsqueeze(1)
+
+
+
+
+
+        # NSE between patches and their per-image means
+        # z = F.normalize(z, dim=-1)
+        sim_loss = (z - mean).pow_(2)
+        print(f"\tsim: {sim_loss.mean()} {sim_loss.max()}")
         
-        # calculate the variance losses using the 
-        z = torch.flatten(z, start_dim=0, end_dim=1)
+        
+        # pdb.set_trace()
+        
+        sim_loss = sim_loss.mean()
+
+        # NOTE: one thing you are doing wrong here is trying to maximize the within-neighbor variance/min. cov... actual VICReg doesn't do this due to separation of var/cov loss term calculations for each "branch"
+        # TODO: is this correct? a bit hard to believe https://github.com/kumarkrishna/fastssl/blob/main/fastssl/models/vicreg.py#L88 
+
+        # convert to centroids for variance/covariance losses. avoids trying to maximize the variance/minimize covariance of patches from the same image
+        # without having to recalculate the covariance matrix for every neighborhood in every image
+        z = z.mean(dim=1)
+
+
+        # z = torch.flatten(z, start_dim=0, end_dim=1)
         z = z - z.mean(dim=0)
         std_z = torch.sqrt(z.var(dim=0) + 0.0001)
         std_loss = torch.mean(F.relu(1 - std_z))
@@ -191,8 +222,11 @@ class VICReg_Loss(nn.Module):
             return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
         
         cov_z = (z.T @ z) / (batch_sz - 1)
-        cov_loss = off_diagonal(cov_z).pow_(2).sum().div(n_features)
+        cov_loss = off_diagonal(cov_z).pow_(2).sum().div(n_features**2)
         loss = self.sim_coeff * sim_loss + self.std_coeff * std_loss + self.cov_coeff * cov_loss
+
+
+        # TODO(as): try to understand why the std loss is persistently high? There must be something with the intiializations
 
         print(f"\t{loss}: {sim_loss} {std_loss} {cov_loss}")
 
