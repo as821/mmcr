@@ -10,6 +10,27 @@ from functools import partial
 import torch
 import torch.nn as nn
 
+import einops
+
+import pdb
+
+from mmcr.cifar_stl.data import calc_whiten_mx
+
+
+def embed_dist_logging(x, name, prefix=""):    
+    # with torch.no_grad():
+    #     # check how similar image patch centroids are. gives a rough sense of the distribution of embeddings
+    #     x_norm = torch.nn.functional.normalize(x, dim=-1)
+    #     x_norm_mean = torch.nn.functional.normalize(x_norm.mean(dim=1), dim=-1)
+        
+    #     # relation of patches to their centroids
+    #     x_sims = (x_norm @ x_norm_mean.T).permute((0, 2, 1))
+    #     x_sims = torch.diagonal(x_sims, dim1=0, dim2=1)
+
+    #     print(f"{prefix}HERE ({name}): \t{(x_norm_mean @ x_norm_mean.T).abs().min()} ({x_sims.min()} {x_sims.abs().min()} {x_sims.max()}, {x_sims.mean()})")
+    return
+
+
 def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
     # https://github.com/facebookresearch/dino/blob/main/utils.py
     def norm_cdf(x):
@@ -77,6 +98,19 @@ class Mlp(nn.Module):
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(drop)
 
+        # m = 0
+        # s = 0.5
+        # torch.nn.init.normal_(self.fc1.weight, mean=m, std=s)
+        # torch.nn.init.normal_(self.fc2.weight, mean=m, std=s)
+        # if self.fc1.bias is not None:
+        #     torch.nn.init.zeros_(self.fc1.bias)
+        # if self.fc2.bias is not None:
+        #     torch.nn.init.zeros_(self.fc2.bias)
+
+        # torch.nn.init.orthogonal_(self.fc1.weight)
+        # torch.nn.init.orthogonal_(self.fc2.weight)
+
+
     def forward(self, x):
         x = self.fc1(x)
         x = self.act(x)
@@ -98,7 +132,21 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
+        m = 0
+        s = 1
+        torch.nn.init.normal_(self.qkv.weight, mean=m, std=s)
+        torch.nn.init.normal_(self.proj.weight, mean=m, std=s)
+        if self.qkv.bias is not None:
+            torch.nn.init.zeros_(self.qkv.bias)
+        if self.proj.bias is not None:
+            torch.nn.init.zeros_(self.proj.bias)
+
+
     def forward(self, x):
+
+        embed_dist_logging(x, "pre-SDPA", "\t\t")
+
+
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
@@ -108,10 +156,21 @@ class Attention(nn.Module):
         # attn = self.attn_drop(attn)
         # x = attn @ v
         
-        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.)
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p if self.training else 0., scale=self.scale)
 
         x = x.transpose(1, 2).reshape(B, N, C)
+        
+
+        embed_dist_logging(x, "post-SDPA", "\t\t")
+        
+        
         x = self.proj(x)
+
+        embed_dist_logging(x, "post-proj", "\t\t")
+        # pdb.set_trace()
+
+
+
         x = self.proj_drop(x)
         return x
 
@@ -121,8 +180,7 @@ class Block(nn.Module):
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
@@ -130,8 +188,22 @@ class Block(nn.Module):
 
     def forward(self, x):
         y = self.attn(self.norm1(x))
+
+        embed_dist_logging(y, "post-attn", "\t")
+
         x = x + self.drop_path(y)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+
+        embed_dist_logging(x, f"post-res (1)", "\t")
+        
+        foo = self.norm2(x)
+        embed_dist_logging(foo, f"post-norm", "\t")
+        foo = self.mlp(foo)
+        embed_dist_logging(foo, "post-mlp", "\t")
+
+
+        x = x + self.drop_path(foo)
+        embed_dist_logging(x, "post-res (2)", "\t")
+
         return x
 
 
@@ -143,19 +215,53 @@ class PatchEmbed(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.patch_stride = patch_stride
+        self.in_chans = in_chans
 
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_stride)
-        
+        # TODO: use unfold for this instead
         # num_patches = (img_size // patch_size) * (img_size // patch_size)
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_stride)
         with torch.no_grad():
             tmp = torch.zeros((in_chans, img_size, img_size))
             shp = self.proj(tmp).shape
             self.num_patches = shp[1] * shp[2]
+        
+        self.proj = nn.Linear(in_chans * patch_size * patch_size, embed_dim)
+        if self.proj.bias is not None:
+            torch.nn.init.zeros_(self.proj.bias)
+
+        # TODO: probably just save this to disk? annoying to have to recompute each time
+        self.whiten_mx, self.mean = calc_whiten_mx(patch_size, patch_stride)
+        self.whiten_mx = self.whiten_mx.to("cuda")
+        self.mean = self.mean.to("cuda")
+
 
     def forward(self, x):
-        B, C, H, W = x.shape
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
+        # generate patches, center + whiten, L2 normalize, then apply a linear layer
+        patches = torch.nn.functional.unfold(x, self.patch_size, stride=self.patch_stride)
+        patches = einops.rearrange(patches, "A (B C) D -> A B C D", B=self.in_chans)
+        patches = patches - self.mean.unsqueeze(0).unsqueeze(-1)
+        
+        
+        patches = einops.rearrange(patches, "A B C D -> A D (B C)")
+        patches = patches @ self.whiten_mx
+
+        patches = torch.nn.functional.normalize(patches, dim=-1)
+        
+        embed_dist_logging(patches, "pre-proj")
+
+        patches = self.proj(patches)
+
+
+        # NOTE: by comparing p_sims[0, :, ...] and proj_sims[0, :, ...] we see that before the Linear layer here 
+        # all patches for an image are somewhat similar to their centroid (0 < cosine sim < 0.3) and nearly orthogonal to the centroids of the patches of all other images
+        # after the linear layer, nearly all centroids and embeddings are squashed down into the same space:
+        # (proj_mean @ proj_mean.T).abs().min() --> 0.916
+        # (p_mean @ p_mean.T).abs().min() --> 1.7794e-05
+
+        # pdb.set_trace()
+
+
+        return patches
 
 
 class VisionTransformer(nn.Module):
@@ -203,10 +309,11 @@ class VisionTransformer(nn.Module):
     #         nn.init.constant_(m.weight, 1.0)
 
     def interpolate_pos_encoding(self, x, w, h):
-        npatch = x.shape[1] - 1
         if self.enable_cls:
+            npatch = x.shape[1] - 1
             N = self.pos_embed.shape[1] - 1
         else:
+            npatch = x.shape[1]
             N = self.pos_embed.shape[1]
         if npatch == N and w == h:
             return self.pos_embed
@@ -243,16 +350,28 @@ class VisionTransformer(nn.Module):
             cls_tokens = self.cls_token.expand(B, -1, -1)
             x = torch.cat((cls_tokens, x), dim=1)
 
-        # add positional encoding to each token
+        # add positional encoding to each token    
         x = x + self.interpolate_pos_encoding(x, w, h)
 
         return self.pos_drop(x)
-
+        
     def forward(self, x):
         x = self.prepare_tokens(x)
-        for blk in self.blocks:
+        
+        embed_dist_logging(x, "post-patch embed")
+        
+        for idx, blk in enumerate(self.blocks):
             x = blk(x)
+            embed_dist_logging(x, f"post block {idx}")
+        # pdb.set_trace() 
+
+
         x = self.norm(x)
+        
+        embed_dist_logging(x, "post norm")
+        # pdb.set_trace() 
+
+
         if self.enable_cls:
             return x[:, 0]
         else:

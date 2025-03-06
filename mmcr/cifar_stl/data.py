@@ -29,6 +29,46 @@ def calc_patch_stats(patch_sz, stride):
     patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
     return patches.mean(dim=1), patches.std(dim=1)
 
+def mx_frac_pow(m, p, tol=1e-6):
+    assert len(m.shape) == 2 and m.shape[0] == m.shape[1]
+
+    m += torch.eye(m.shape[0], device=m.device) * tol      # handle singular mx
+    evals, evecs = torch.linalg.eigh(m)
+
+    # invert any negative e'val/e'vec
+    neg_mask = evals < 0
+    evecs[:, neg_mask] = evecs[:, neg_mask] * -1
+    evals = torch.abs(evals)
+    # assert not torch.any(evals < 0), f"Negative eigenvalues: {evals.min()}"
+    
+    evpow = evals ** p
+
+    out = evecs @ torch.diag(evpow) @ torch.inverse(evecs)
+    assert not torch.any(torch.isnan(out)), "Matrix inverse sqrt. is NaN"
+    return out
+
+
+def calc_whiten_mx(patch_sz, stride):
+    # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
+    data_dir = "./datasets/"
+    train_data = torchvision.datasets.CIFAR10(root=data_dir, train=True, transform=transforms.transforms.ToTensor(), download=True)    
+    
+    data = torch.from_numpy(train_data.data).to(torch.float32) / 255
+    data = data.permute((0, 3, 1, 2))
+
+    patches = torch.nn.functional.unfold(data, patch_sz, stride=stride)
+
+    # center patches (using dataset-level patch mean)
+    shp = patches.shape
+    patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
+    mean = patches.mean(dim=1).unsqueeze(-1)
+    patches -= mean
+    patches = einops.rearrange(patches, "B (A C D) -> (B C) (A D)", A=shp[0], D=shp[-1])
+
+    # patches = einops.rearrange(patches, "A B C -> B (A C)")    
+    cov_mx = torch.cov(patches)
+    return mx_frac_pow(cov_mx.to("cuda"), -1/2).cpu(), mean
+
 
 def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, batch_sz=-1, **kwargs):
     data_dir = "./datasets/"
@@ -60,7 +100,9 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
         )
     elif dataset == "cifar10":
         # calculates pixel-level statistics given the patching strategy to be used
-        mean, std = calc_patch_stats(24, 1)
+        # mean, std = calc_patch_stats(24, 1)
+        mean = [0.4914, 0.4822, 0.4465],
+        std = [0.2023, 0.1994, 0.2010],
         
         train_data = torchvision.datasets.CIFAR10(
             root=data_dir,
@@ -250,6 +292,7 @@ class CifarBatchTransform:
         **kwargs,
     ):
         if train_transform:
+            assert False, "WRONG"
             if strong_aug:
                 lst_of_transform = [
                     transforms.RandomResizedCrop(32),
@@ -307,7 +350,7 @@ class CifarBatchTransform:
             self.transform = transforms.Compose(
                 [
                     transforms.ToTensor(),
-                    transforms.Normalize(mean, std),
+                    # transforms.Normalize(mean, std),
                 ]
             )
         self.n_transform = n_transform

@@ -64,7 +64,7 @@ def train(args):
     )
 
     # test set with training transformations
-    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=10))
+    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=False, batch_transform=True, n_transform=10))
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
     stats_data = next(iter(stats_loader))
 
