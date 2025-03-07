@@ -19,7 +19,8 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_
         sz = 192 if use_feat else out_dim
         features = torch.zeros((data.shape[0], data.shape[1], sz), dtype=data.dtype, device="cuda")
         centroids = torch.zeros((data.shape[0], sz), dtype=data.dtype, device="cuda")
-        aug_centroid_sim = torch.zeros((data.shape[0], data.shape[1]), device="cpu")
+        # aug_centroid_sim = torch.zeros((data.shape[0], data.shape[1]), device="cpu")
+        aug_centroid_sim = torch.zeros((data.shape[0], model.f.patch_embed.num_patches), device="cpu")
         for idx in range(data.shape[0]):
             feat, out = model(data[idx].cuda(non_blocking=True))
             if not use_feat:
@@ -27,6 +28,7 @@ def calc_manifold_subspace_alignment(vis_dict, model, data_tuple, use_feat, out_
                 feat = F.normalize(feat, dim=-1)
 
             # calculate the centroid of this image manifold
+            feat = feat.squeeze()       # a result of the fact that the points of this manifold are patches from a single image and not augmentations
             centroid = feat.mean(dim=0)
             centroids[idx] = centroid
 

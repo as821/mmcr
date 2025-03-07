@@ -16,6 +16,7 @@ from PIL import Image, ImageOps, ImageFilter
 from torch.utils.data import Dataset
 
 import pdb
+import os
 
 def calc_patch_stats(patch_sz, stride):
     # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
@@ -49,25 +50,34 @@ def mx_frac_pow(m, p, tol=1e-6):
 
 
 def calc_whiten_mx(patch_sz, stride):
-    # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
-    data_dir = "./datasets/"
-    train_data = torchvision.datasets.CIFAR10(root=data_dir, train=True, transform=transforms.transforms.ToTensor(), download=True)    
-    
-    data = torch.from_numpy(train_data.data).to(torch.float32) / 255
-    data = data.permute((0, 3, 1, 2))
+    path = f"/tmp/cifar10_whiten_mean_{patch_sz}_{stride}"
+    if os.path.exists(path):
+        loaded = torch.load(path)
+        return loaded["whiten"], loaded["mean"]
+    else:    
+        # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
+        data_dir = "./datasets/"
+        train_data = torchvision.datasets.CIFAR10(root=data_dir, train=True, transform=transforms.transforms.ToTensor(), download=True)    
+        
+        data = torch.from_numpy(train_data.data).to(torch.float32) / 255
+        data = data.permute((0, 3, 1, 2))
 
-    patches = torch.nn.functional.unfold(data, patch_sz, stride=stride)
+        patches = torch.nn.functional.unfold(data, patch_sz, stride=stride)
 
-    # center patches (using dataset-level patch mean)
-    shp = patches.shape
-    patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
-    mean = patches.mean(dim=1).unsqueeze(-1)
-    patches -= mean
-    patches = einops.rearrange(patches, "B (A C D) -> (B C) (A D)", A=shp[0], D=shp[-1])
+        # center patches (using dataset-level patch mean)
+        shp = patches.shape
+        patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
+        mean = patches.mean(dim=1).unsqueeze(-1)
+        patches -= mean
+        patches = einops.rearrange(patches, "B (A C D) -> (B C) (A D)", A=shp[0], D=shp[-1])
 
-    # patches = einops.rearrange(patches, "A B C -> B (A C)")    
-    cov_mx = torch.cov(patches)
-    return mx_frac_pow(cov_mx.to("cuda"), -1/2).cpu(), mean
+        # patches = einops.rearrange(patches, "A B C -> B (A C)")    
+        cov_mx = torch.cov(patches)
+
+        # save to /tmp
+        whiten = mx_frac_pow(cov_mx.to("cuda"), -1/2).cpu()
+        torch.save({"whiten" : whiten, "mean" : mean}, path)
+        return whiten, mean
 
 
 def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, batch_sz=-1, **kwargs):

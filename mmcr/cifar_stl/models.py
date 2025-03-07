@@ -34,7 +34,7 @@ class Model(nn.Module):
         if self.use_cls_token:
             self.f = vit_tiny(patch_size=4, enable_cls=True)
         else:
-            self.f = vit_tiny(patch_size=8, patch_stride=1)
+            self.f = vit_tiny(patch_size=4, patch_stride=1)
 
         # projection head (Following exactly barlow twins offical repo)
         projector_dims = [192] + projector_dims

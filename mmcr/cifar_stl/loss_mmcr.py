@@ -128,17 +128,20 @@ class MMCR_Loss(nn.Module):
         # z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
         n_patch_per_dim = int(math.sqrt(z.shape[1]))
         assert n_patch_per_dim ** 2 == z.shape[1]
-        z_local = einops.rearrange(z, "B (A D) C -> B C A D", A=n_patch_per_dim)
 
-        n_neighbors = 3
-        neighborhood = torch.nn.functional.unfold(z_local, n_neighbors)
 
+        # mean embedding of all patches in the image
+        centroids = z.mean(dim=1)
+
+
+        # z_local = einops.rearrange(z, "B (A D) C -> B C A D", A=n_patch_per_dim)
         # undo some of the flattening unfold did and rearrange so neighbor dimension is last
-        neighborhood = einops.rearrange(neighborhood, "A (B C) D -> A B C D", B=z.shape[-1])
-        neighborhood = einops.rearrange(neighborhood, "A B C D -> A D B C", B=z.shape[-1])
-        
-        centroids = torch.mean(neighborhood, dim=-1)
-        centroids = torch.flatten(centroids, start_dim=0, end_dim=1)
+        # n_neighbors = 5
+        # neighborhood = torch.nn.functional.unfold(z_local, n_neighbors)
+        # neighborhood = einops.rearrange(neighborhood, "A (B C) D -> A B C D", B=z.shape[-1])
+        # neighborhood = einops.rearrange(neighborhood, "A B C D -> A D B C", B=z.shape[-1])
+        # centroids = torch.mean(neighborhood, dim=-1)
+        # centroids = torch.flatten(centroids, start_dim=0, end_dim=1)
 
 
         # centroids = torch.mean(z_local, dim=-1)

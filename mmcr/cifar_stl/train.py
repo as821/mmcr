@@ -64,7 +64,7 @@ def train(args):
     )
 
     # test set with training transformations
-    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=False, batch_transform=True, n_transform=10))
+    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=False, batch_transform=True, n_transform=1))
     stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
     stats_data = next(iter(stats_loader))
 
@@ -82,8 +82,8 @@ def train(args):
         wandb.watch(model, log_freq=10)
 
     total_loss, total_num, vis_dict = 0.0, 0, {}
-    # loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, sv_pow=args.sv_pow, centroid_dropout_prob=args.centroid_dropout_prob, pca_dropout=args.pca_dropout, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
-    loss_function = VICReg_Loss()
+    loss_function = MMCR_Loss(lmbda=args.lmbda, n_aug=args.n_aug, distributed=False, l2_spectral_norm=args.l2_spectral_norm, spectral_target=args.spectral_target, spectral_topk=args.spectral_topk, huber=args.huber, huber_pow=args.huber_pow, sv_pow=args.sv_pow, centroid_dropout_prob=args.centroid_dropout_prob, pca_dropout=args.pca_dropout, memory_bank=BatchFIFOQueue(args.mem_bank, args.batch_size) if args.mem_bank > 0 else None)
+    # loss_function = VICReg_Loss()
 
     plot_freq = 1500
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
@@ -174,6 +174,7 @@ def train(args):
                         # vis_dict = visualize_vector_time_series(vis_dict, loss_dict["global_sing_vals"], total_steps, prefix="global_sing_vals", plot=plot)
                         # vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"], plot=plot)
 
+                        model_out_vis = model_out_vis.flatten(0, 1)
                         vis_dict["out_cov_cond_num"] = torch.linalg.cond(model_out_vis.detach().T @ model_out_vis.detach())
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = knn_acc_1
