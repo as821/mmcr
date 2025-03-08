@@ -64,15 +64,7 @@ def train_val(net, data_loader, train_optimizer, epoch):
     )
 
 
-def train_classifier(
-    model_path: str,
-    dataset: str = "cifar10",
-    batch_size: int = 512,
-    epochs: int = 50,
-    lr: float = 1e-2,
-    save_path=None,
-    save_name=None,
-):
+def train_classifier_model(backbone, dataset="cifar10", batch_size=512, epochs=50, lr=1e-2, save_path=None, save_name=None):
     top_acc = 0.0
     train_data, _, test_data = get_datasets(
         dataset, 1, batch_transform=False, supervised=True
@@ -85,13 +77,8 @@ def train_classifier(
         test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True
     )
 
-    # load pretrained weights
-    pretrained_model = Model(dataset=dataset)
-    pretrained_model = torch.compile(pretrained_model)
-    sd = torch.load(model_path, map_location="cpu")
-    pretrained_model.load_state_dict(sd)
     dataset_num_classes = {"cifar10": 10, "stl10": 10, "cifar100": 100}
-    model = Net(pretrained_model.f, dataset_num_classes[dataset])
+    model = Net(backbone, dataset_num_classes[dataset])
 
     # only fully connected requires grad
     model.requires_grad_(False)
@@ -123,14 +110,87 @@ def train_classifier(
     return model, top_acc
 
 
+def train_classifier(
+    model_path: str,
+    dataset: str = "cifar10",
+    batch_size: int = 512,
+    epochs: int = 50,
+    lr: float = 1e-2,
+    save_path=None,
+    save_name=None,
+):
+    # load pretrained weights
+    pretrained_model = Model(dataset=dataset)
+    pretrained_model = torch.compile(pretrained_model)
+    sd = torch.load(model_path, map_location="cpu")
+    pretrained_model.load_state_dict(sd)
+
+    return train_classifier_model(pretrained_model.f, dataset, batch_size, epochs, lr, save_path, save_name)
+
+
 # a wrapper class for the resnet50 model
 class Net(nn.Module):
     def __init__(self, f, num_classes):
         super().__init__()
         self.f = f
-        self.fc = nn.Linear(512, num_classes)
+        # self.fc = nn.Linear(512, num_classes)
+        self.fc = AttentionPoolingClassifier(512, num_classes)
 
     def forward(self, x):
         f = self.f(x)
-        f = f.view(f.size(0), -1)
+        # f = f.view(f.size(0), -1)
         return self.fc(f)
+
+# https://github.com/apple/ml-aim/blob/cb4171a25253dff87237f5fd5ee16fc633667d4f/aim-v1/aim/v1/torch/layers.py#L343
+class AttentionPoolingClassifier(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        out_features: int,
+        num_heads: int = 12,
+        num_queries: int = 1,
+        use_batch_norm: bool = True,
+        qkv_bias: bool = False,
+        linear_bias: bool = False,
+        average_pool: bool = True,
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        self.num_queries = num_queries
+        self.average_pool = average_pool
+
+        self.k = nn.Linear(dim, dim, bias=qkv_bias)
+        self.v = nn.Linear(dim, dim, bias=qkv_bias)
+        self.cls_token = nn.Parameter(torch.randn(1, num_queries, dim) * 0.02)
+        self.linear = nn.Linear(dim, out_features, bias=linear_bias)
+        self.bn = (
+            nn.BatchNorm1d(dim, affine=False, eps=1e-6)
+            if use_batch_norm
+            else nn.Identity()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, N, C = x.shape
+        x = self.bn(x.transpose(-2, -1)).transpose(-2, -1)
+        cls_token = self.cls_token.expand(B, -1, -1)
+
+        q = cls_token.reshape(
+            B, self.num_queries, self.num_heads, C // self.num_heads
+        ).permute(0, 2, 1, 3)
+        k = (
+            self.k(x)
+            .reshape(B, N, self.num_heads, C // self.num_heads)
+            .permute(0, 2, 1, 3)
+        )
+        v = (
+            self.v(x)
+            .reshape(B, N, self.num_heads, C // self.num_heads)
+            .permute(0, 2, 1, 3)
+        )
+
+        x_cls = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        x_cls = x_cls.transpose(1, 2).reshape(B, self.num_queries, C)
+        x_cls = x_cls.mean(dim=1) if self.average_pool else x_cls
+
+        out = self.linear(x_cls)
+        return out

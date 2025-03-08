@@ -147,6 +147,10 @@ def train(args):
                     model.eval()
                     out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
                     model.eval()                    
+                    _, probe_acc_1 = train_classifier_model(model.f)
+                    if probe_acc_1 > top_acc:
+                        top_acc = probe_acc_1
+                    model.eval()
 
                     if args.wandb:
                         # check manifold subspace alignment 
@@ -177,6 +181,7 @@ def train(args):
                         vis_dict["val_acc_5"] = acc_5
                         vis_dict["out_acc_1"] = out_acc_1
                         vis_dict["out_acc_5"] = out_acc_5
+                        vis_dict["probe_acc_1"] = probe_acc_1
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
                         vis_dict["precond_alpha"] = args.precond_alpha
 
