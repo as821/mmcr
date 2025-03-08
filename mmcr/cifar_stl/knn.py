@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 
 from tqdm import tqdm
 
+import pdb
 
 ###  KNN based evaluation, for use during unsupervised pretraining to track progress ###
 # adapted from: https://github.com/yaohungt/Barlow-Twins-HSIC/blob/main/main.py
@@ -28,6 +29,10 @@ def test_one_epoch(
             else:
                 _, out = net(data.cuda(non_blocking=True))
             feature = F.normalize(out, dim=-1)
+
+            # TODO: basically just do average pooling over all the patches. Should really just be training an attentional probe here...
+            feature = torch.mean(feature, dim=1)
+            
             feature_bank.append(feature)
         # [D, N]
         feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
@@ -45,6 +50,9 @@ def test_one_epoch(
             else:
                 _, out = net(data)
             feature = F.normalize(out, dim=-1)
+            
+            # TODO: basically just do average pooling over all the patches. Should really just be training an attentional probe here...
+            feature = torch.mean(feature, dim=1)
 
             total_num += data.size(0)
             # compute cos similarity between each feature vector and feature bank ---> [B, N]
