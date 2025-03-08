@@ -85,6 +85,7 @@ def train_classifier_model(backbone, dataset="cifar10", batch_size=512, epochs=5
     model.requires_grad_(False)
     model.fc.requires_grad_(True)
     model = model.cuda()
+    model = torch.compile(model)
 
     optimizer = optim.Adam(model.fc.parameters(), lr=lr, weight_decay=1e-6, fused=True)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
