@@ -9,10 +9,75 @@ import torchvision
 import torchvision.transforms.functional as TF
 from torchvision.datasets import CIFAR10
 import torch
+import einops
 
 import random
 from PIL import Image, ImageOps, ImageFilter
 from torch.utils.data import Dataset
+
+import pdb
+import os
+
+def calc_patch_stats(patch_sz, stride):
+    # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
+    data_dir = "./datasets/"
+    train_data = torchvision.datasets.CIFAR10(root=data_dir, train=True, transform=transforms.transforms.ToTensor(), download=True)    
+    
+    data = torch.from_numpy(train_data.data).to(torch.float32) / 255
+    data = data.permute((0, 3, 1, 2))
+
+    patches = torch.nn.functional.unfold(data, patch_sz, stride=stride)
+    patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
+    return patches.mean(dim=1), patches.std(dim=1)
+
+def mx_frac_pow(m, p, tol=1e-6):
+    assert len(m.shape) == 2 and m.shape[0] == m.shape[1]
+
+    m += torch.eye(m.shape[0], device=m.device) * tol      # handle singular mx
+    evals, evecs = torch.linalg.eigh(m)
+
+    # invert any negative e'val/e'vec
+    neg_mask = evals < 0
+    evecs[:, neg_mask] = evecs[:, neg_mask] * -1
+    evals = torch.abs(evals)
+    # assert not torch.any(evals < 0), f"Negative eigenvalues: {evals.min()}"
+    
+    evpow = evals ** p
+
+    out = evecs @ torch.diag(evpow) @ torch.inverse(evecs)
+    assert not torch.any(torch.isnan(out)), "Matrix inverse sqrt. is NaN"
+    return out
+
+
+def calc_whiten_mx(patch_sz, stride):
+    path = f"/tmp/cifar10_whiten_mean_{patch_sz}_{stride}"
+    if os.path.exists(path):
+        loaded = torch.load(path)
+        return loaded["whiten"], loaded["mean"]
+    else:    
+        # NOTE: pixel mean/variance for overlapping patches is different than that of the original dataset
+        data_dir = "./datasets/"
+        train_data = torchvision.datasets.CIFAR10(root=data_dir, train=True, transform=transforms.transforms.ToTensor(), download=True)    
+        
+        data = torch.from_numpy(train_data.data).to(torch.float32) / 255
+        data = data.permute((0, 3, 1, 2))
+
+        patches = torch.nn.functional.unfold(data, patch_sz, stride=stride)
+
+        # center patches (using dataset-level patch mean)
+        shp = patches.shape
+        patches = einops.rearrange(patches, "A (B C) D -> B (A C D)", B=data.shape[1])
+        mean = patches.mean(dim=1).unsqueeze(-1)
+        patches -= mean
+        patches = einops.rearrange(patches, "B (A C D) -> (B C) (A D)", A=shp[0], D=shp[-1])
+
+        # patches = einops.rearrange(patches, "A B C -> B (A C)")    
+        cov_mx = torch.cov(patches)
+
+        # save to /tmp
+        whiten = mx_frac_pow(cov_mx.to("cuda"), -1/2).cpu()
+        torch.save({"whiten" : whiten, "mean" : mean}, path)
+        return whiten, mean
 
 
 def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_aug=False, diffusion_aug=False, weak_aug=False, strongest_aug=False, batch_sz=-1, **kwargs):
@@ -44,17 +109,24 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
             download=False,
         )
     elif dataset == "cifar10":
+        # calculates pixel-level statistics given the patching strategy to be used
+        # mean, std = calc_patch_stats(24, 1)
+        mean = [0.4914, 0.4822, 0.4465],
+        std = [0.2023, 0.1994, 0.2010],
+        
         train_data = torchvision.datasets.CIFAR10(
             root=data_dir,
             train=True,
             transform=CifarBatchTransform(
-                train_transform=True,
-                batch_transform=batch_transform,
+                train_transform=False,
+                batch_transform=False,
                 n_transform=n_aug,
                 strong_aug=strong_aug,
                 strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
+                mean=mean,
+                std=std,
                 **kwargs,
             ),
             download=True,
@@ -70,6 +142,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
+                mean=mean,
+                std=std,
                 **kwargs,
             ),
             download=True,
@@ -85,6 +159,8 @@ def get_datasets(dataset, n_aug, batch_transform=True, supervised=False, strong_
                 strongest_aug=strongest_aug,
                 weak_aug=weak_aug,
                 diffusion_aug=diffusion_aug,
+                mean=mean,
+                std=std,
                 **kwargs,
             ),
             download=True,
@@ -221,9 +297,12 @@ class CifarBatchTransform:
         diffusion_aug=False,
         weak_aug=False,
         strongest_aug=False,
+        mean=[0.4914, 0.4822, 0.4465],
+        std=[0.2023, 0.1994, 0.2010],
         **kwargs,
     ):
         if train_transform:
+            assert False, "WRONG"
             if strong_aug:
                 lst_of_transform = [
                     transforms.RandomResizedCrop(32),
@@ -235,9 +314,7 @@ class CifarBatchTransform:
                     GaussianBlur(0.5),
                     Solarization(0.2),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             elif strongest_aug:
                 lst_of_transform = [
@@ -250,27 +327,21 @@ class CifarBatchTransform:
                     GaussianBlur(0.75),
                     Solarization(0.5),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             elif weak_aug:
                 lst_of_transform = [
                     transforms.RandomResizedCrop(32, scale=(0.3, 1)),
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]                
             elif diffusion_aug:
                 lst_of_transform = [
                     transforms.RandomResizedCrop(32),
                     transforms.RandomHorizontalFlip(p=0.5),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
             else:
                 lst_of_transform = [
@@ -281,9 +352,7 @@ class CifarBatchTransform:
                     ),
                     transforms.RandomGrayscale(p=0.2),
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    transforms.Normalize(mean, std),
                 ]
 
             self.transform = transforms.Compose(lst_of_transform)
@@ -291,9 +360,7 @@ class CifarBatchTransform:
             self.transform = transforms.Compose(
                 [
                     transforms.ToTensor(),
-                    transforms.Normalize(
-                        [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
-                    ),
+                    # transforms.Normalize(mean, std),
                 ]
             )
         self.n_transform = n_transform
@@ -301,36 +368,21 @@ class CifarBatchTransform:
         self.diffusion_aug = diffusion_aug
 
     def __call__(self, x):
-        if self.batch_transform:
-            C, H, W = TF.to_tensor(x).shape
-            C_aug, H_aug, W_aug = self.transform(x).shape
+        # if self.batch_transform:
+        # C, H, W = TF.to_tensor(x).shape
+        # C_aug, H_aug, W_aug = self.transform(x).shape
+        y = self.transform(x)
 
-            y = torch.zeros(self.n_transform, C_aug, H_aug, W_aug)
-            for i in range(self.n_transform):
-                y[i, :, :, :] = self.transform(x)
-            return y
-        else:
-            return self.transform(x)
+        # TODO: our "augmentation" is just patchifying the image with some patch size/stride
+        patch_size = 8
+        patch_stride = 1
 
+        y = torch.nn.functional.unfold(y, patch_size, stride=patch_stride)
+        y = einops.rearrange(y, "(A B C) D -> D A B C", B=patch_size, C=patch_size)
+        # y = torch.zeros(self.n_transform, C_aug, H_aug, W_aug)
+        # for i in range(self.n_transform):
+        #     y[i, :, :, :] = self.transform(x)
+        return y
+        # else:
+        #     return self.transform(x)
 
-
-class DummyDataset(Dataset):
-    def __init__(self, root, train, transform, download, batch_sz):
-        self.dataset = torchvision.datasets.CIFAR10(
-            root=root,
-            train=train,
-            transform=transform,
-            download=download,
-        )
-        self.batch_sz = batch_sz
-
-    def __len__(self):
-        return self.batch_sz
-    
-    def __getitem__(self, idx):
-        if idx > self.batch_sz:
-            raise NotImplementedError
-        
-        if torch.is_tensor(idx):
-            idx = idx.tolist()    
-        return self.dataset[idx]

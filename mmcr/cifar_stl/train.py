@@ -53,7 +53,7 @@ def train(args):
     )
     model = Model(projector_dims=[512, args.out_dim], dataset=args.dataset)
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=16, pin_memory=True, drop_last=True #, prefetch_factor=4, persistent_workers=True
+        train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True, drop_last=True #, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
         memory_dataset, batch_size=128, shuffle=True, num_workers=16
@@ -63,8 +63,8 @@ def train(args):
     )
 
     # test set with training transformations
-    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=True, batch_transform=True, n_transform=10))
-    stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=12)
+    stats_dset = torchvision.datasets.CIFAR10(root="./datasets/", train=False, download=True, transform=CifarBatchTransform(train_transform=False, batch_transform=True, n_transform=1))
+    stats_loader = torch.utils.data.DataLoader(stats_dset, batch_size=128, shuffle=False, num_workers=0)
     stats_data = next(iter(stats_loader))
 
 
@@ -87,7 +87,7 @@ def train(args):
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
 
     model = model.cuda()
-    model = torch.compile(model, mode="max-autotune")
+    # model = torch.compile(model, mode="max-autotune")
     top_acc, total_steps = 0.0, 0
     for epoch in range(args.epochs):
         model.train()
