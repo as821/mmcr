@@ -140,18 +140,7 @@ def train(args):
 
             if total_steps % args.log_freq == 0:
                 with torch.no_grad():
-                    # model.eval()
-                    # acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
-                    # if acc_1 > top_acc:
-                    #     top_acc = acc_1
-                    # model.eval()
-                    # out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
-                    model.eval()                    
-                    _, probe_acc_1 = train_classifier_model(model.f)
-                    if probe_acc_1 > top_acc:
-                        top_acc = probe_acc_1
                     model.eval()
-
                     if args.wandb:
                         # check manifold subspace alignment 
                         vis_dict = calc_manifold_subspace_alignment(vis_dict, model, stats_data, False, args.out_dim)
@@ -162,25 +151,45 @@ def train(args):
                         # vis_dict = visualize_augmentations(vis_dict, img_batch)
                         assert not model.training
 
-
                         # track the e'val of the feature covariance matrix
                         vis_dict = visualize_feature_cov_decomp(vis_dict, model_out_vis, total_steps, False, prefix="out", plot=plot)
-
                         vis_dict = visualize_feature_cov_decomp(vis_dict, feat_vis, total_steps, False, plot=plot)
 
 
                         # plot evolution of centroid pre/post conditioner covariance and global singular values
                         vis_dict = visualize_feature_cov_decomp(vis_dict, loss_dict["centroid_post_conditioner"], total_steps, False, prefix="centroid_postcond", plot=plot)
                         vis_dict = visualize_vector_time_series(vis_dict, loss_dict["global_sing_vals"], total_steps, prefix="global_sing_vals", plot=plot)
-
                         vis_dict = visualize_centoid_sing_val_stats(vis_dict, total_steps, loss_dict["centroid_post_conditioner"], loss_dict["global_sing_vals"], plot=plot)
-
                         vis_dict["out_cov_cond_num"] = torch.linalg.cond(model_out_vis.detach().T @ model_out_vis.detach())
+
+                    # make space on GPU for probe training
+                    del model_out_vis
+                    del feat_vis
+                    del img_batch
+                    del labels
+                    del model_out
+                    del feat
+
+                    model.eval()                    
+                    model = model.cpu()
+                    _, probe_acc_1 = train_classifier_model(model.f, batch_size=384)
+                    if probe_acc_1 > top_acc:
+                        top_acc = probe_acc_1
+                    model = model.cuda()
+                    model.eval()
+
+                    model.eval()
+                    acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
+                    model.eval()
+                    # out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
+                    # model.eval()                    
+
+                    if args.wandb:
                         vis_dict["train_loss"] = total_loss / total_num
                         vis_dict["val_acc_1"] = acc_1
                         vis_dict["val_acc_5"] = acc_5
-                        vis_dict["out_acc_1"] = out_acc_1
-                        vis_dict["out_acc_5"] = out_acc_5
+                        # vis_dict["out_acc_1"] = out_acc_1
+                        # vis_dict["out_acc_5"] = out_acc_5
                         vis_dict["probe_acc_1"] = probe_acc_1
                         vis_dict["lr"] = scheduler.get_last_lr()[0]
                         vis_dict["precond_alpha"] = args.precond_alpha

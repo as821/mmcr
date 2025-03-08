@@ -72,10 +72,10 @@ def train_classifier_model(backbone, dataset="cifar10", batch_size=512, epochs=5
     )
 
     train_loader = DataLoader(
-        train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True
+        train_data, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
     )
     test_loader = DataLoader(
-        test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True
+        test_data, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
     )
 
     dataset_num_classes = {"cifar10": 10, "stl10": 10, "cifar100": 100}
@@ -86,7 +86,7 @@ def train_classifier_model(backbone, dataset="cifar10", batch_size=512, epochs=5
     model.fc.requires_grad_(True)
     model = model.cuda()
 
-    optimizer = optim.Adam(model.fc.parameters(), lr=lr, weight_decay=1e-6)
+    optimizer = optim.Adam(model.fc.parameters(), lr=lr, weight_decay=1e-6, fused=True)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     if save_path is not None and save_name is None:
