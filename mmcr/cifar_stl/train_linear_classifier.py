@@ -8,6 +8,8 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 from typing import OrderedDict
+import einops
+import pdb
 
 from mmcr.cifar_stl.data import get_datasets
 from mmcr.cifar_stl.models import Model
@@ -31,7 +33,6 @@ def train_val(net, data_loader, train_optimizer, epoch):
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
             out = net(data)
             loss = loss_criterion(out, target)
-
             if is_train:
                 train_optimizer.zero_grad()
                 loss.backward()
@@ -137,8 +138,10 @@ class Net(nn.Module):
         self.fc = AttentionPoolingClassifier(512, num_classes)
 
     def forward(self, x):
+        shp = x.shape
+        x = einops.rearrange(x, "B N C H W -> (B N) C H W")
         f = self.f(x)
-        # f = f.view(f.size(0), -1)
+        f = einops.rearrange(f, "(B N) C H W -> B N (C H W)", B=shp[0])
         return self.fc(f)
 
 # https://github.com/apple/ml-aim/blob/cb4171a25253dff87237f5fd5ee16fc633667d4f/aim-v1/aim/v1/torch/layers.py#L343
@@ -147,7 +150,7 @@ class AttentionPoolingClassifier(nn.Module):
         self,
         dim: int,
         out_features: int,
-        num_heads: int = 12,
+        num_heads: int = 16,
         num_queries: int = 1,
         use_batch_norm: bool = True,
         qkv_bias: bool = False,

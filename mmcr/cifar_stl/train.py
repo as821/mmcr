@@ -15,7 +15,7 @@ from mmcr.cifar_stl.models import Model
 from mmcr.cifar_stl.knn import test_one_epoch
 from mmcr.cifar_stl.loss_mmcr import MMCR_Loss, BatchFIFOQueue, GradientPreconditioning
 from mmcr.cifar_stl.analysis import calc_manifold_subspace_alignment, visualize_augmentations, visualize_feature_cov_decomp, visualize_vector_time_series, visualize_centoid_sing_val_stats, visualize_cov_evec
-
+from mmcr.cifar_stl.train_linear_classifier import train_classifier_model
 
 import pdb
 
@@ -56,10 +56,10 @@ def train(args):
         train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True, drop_last=True #, prefetch_factor=4, persistent_workers=True
     )
     memory_loader = torch.utils.data.DataLoader(
-        memory_dataset, batch_size=128, shuffle=True, num_workers=16
+        memory_dataset, batch_size=128, shuffle=True, num_workers=4, pin_memory=True
     )
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=128, shuffle=False, num_workers=16
+        test_dataset, batch_size=128, shuffle=False, num_workers=4, pin_memory=True
     )
 
     # test set with training transformations
@@ -87,7 +87,7 @@ def train(args):
     assert plot_freq % args.log_freq == 0 or args.log_freq % plot_freq == 0
 
     model = model.cuda()
-    # model = torch.compile(model, mode="max-autotune")
+    model = torch.compile(model, mode="max-autotune")
     top_acc, total_steps = 0.0, 0
     for epoch in range(args.epochs):
         model.train()
@@ -140,12 +140,12 @@ def train(args):
 
             if total_steps % args.log_freq == 0:
                 with torch.no_grad():
-                    model.eval()
-                    acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
-                    if acc_1 > top_acc:
-                        top_acc = acc_1
-                    model.eval()
-                    out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
+                    # model.eval()
+                    # acc_1, acc_5 = test_one_epoch(model, memory_loader, test_loader)
+                    # if acc_1 > top_acc:
+                    #     top_acc = acc_1
+                    # model.eval()
+                    # out_acc_1, out_acc_5 = test_one_epoch(model, memory_loader, test_loader, feat=False)
                     model.eval()                    
                     _, probe_acc_1 = train_classifier_model(model.f)
                     if probe_acc_1 > top_acc:
@@ -192,7 +192,7 @@ def train(args):
                     
                     total_loss, total_num, vis_dict = 0.0, 0, {}
 
-                    if epoch % args.save_freq == 0 or acc_1 == top_acc:
+                    if epoch % args.save_freq == 0 or probe_acc_1 == top_acc:
                         torch.save(
                             model.state_dict(),
                             f"{args.save_folder}/{args.dataset}_{args.n_aug}_{epoch}_acc_{acc_1:0.2f}.pth",

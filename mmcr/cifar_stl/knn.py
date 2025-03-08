@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import pdb
+import einops
 
 ###  KNN based evaluation, for use during unsupervised pretraining to track progress ###
 # adapted from: https://github.com/yaohungt/Barlow-Twins-HSIC/blob/main/main.py
@@ -23,12 +24,15 @@ def test_one_epoch(
         # generate feature bank and target bank
         for data_tuple in tqdm(memory_data_loader):
             data, target = data_tuple
+            shp = data.shape
+            data = einops.rearrange(data, "B N C H W -> (B N) C H W")
             target_bank.append(target)
             if feat:
                 out, _ = net(data.cuda(non_blocking=True))
             else:
                 _, out = net(data.cuda(non_blocking=True))
             feature = F.normalize(out, dim=-1)
+            feature = einops.rearrange(feature, "(B N) C -> B N C", B=shp[0])
 
             # TODO: basically just do average pooling over all the patches. Should really just be training an attentional probe here...
             feature = torch.mean(feature, dim=1)
@@ -44,30 +48,35 @@ def test_one_epoch(
         test_bar = tqdm(test_data_loader)
         for data_tuple in test_bar:
             data, target = data_tuple
+
+            shp = data.shape
+            data = einops.rearrange(data, "B N C H W -> (B N) C H W")
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
             if feat:
                 out, _ = net(data)
             else:
                 _, out = net(data)
             feature = F.normalize(out, dim=-1)
+
+            feature = einops.rearrange(feature, "(B N) C -> B N C", B=shp[0])
             
             # TODO: basically just do average pooling over all the patches. Should really just be training an attentional probe here...
             feature = torch.mean(feature, dim=1)
 
-            total_num += data.size(0)
+            total_num += feature.size(0)
             # compute cos similarity between each feature vector and feature bank ---> [B, N]
             sim_matrix = torch.mm(feature, feature_bank)
             # [B, K]
             sim_weight, sim_indices = sim_matrix.topk(k=k, dim=-1)
             # [B, K]
             sim_labels = torch.gather(
-                feature_labels.expand(data.size(0), -1), dim=-1, index=sim_indices
+                feature_labels.expand(feature.size(0), -1), dim=-1, index=sim_indices
             )
             sim_weight = (sim_weight / temperature).exp()
 
             # counts for each class
             one_hot_label = torch.zeros(
-                data.size(0) * k, 1000, device=sim_labels.device
+                feature.size(0) * k, 1000, device=sim_labels.device
             )
             # [B*K, C]
             one_hot_label = one_hot_label.scatter(
@@ -75,7 +84,7 @@ def test_one_epoch(
             )
             # weighted score ---> [B, C]
             pred_scores = torch.sum(
-                one_hot_label.view(data.size(0), -1, 1000)
+                one_hot_label.view(feature.size(0), -1, 1000)
                 * sim_weight.unsqueeze(dim=-1),
                 dim=1,
             )
