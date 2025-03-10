@@ -374,7 +374,7 @@ class CifarBatchTransform:
         y = self.transform(x)
 
         # TODO: our "augmentation" is just patchifying the image with some patch size/stride
-        patch_size = 8
+        patch_size = 16
         patch_stride = 1
 
         y = torch.nn.functional.unfold(y, patch_size, stride=patch_stride)

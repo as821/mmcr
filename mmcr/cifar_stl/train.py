@@ -172,7 +172,7 @@ def train(args):
 
                     model.eval()                    
                     model = model.cpu()
-                    _, probe_acc_1 = train_classifier_model(model.f, batch_size=384)
+                    _, probe_acc_1 = train_classifier_model(model.f, batch_size=384, epochs=15)
                     if probe_acc_1 > top_acc:
                         top_acc = probe_acc_1
                     model = model.cuda()
