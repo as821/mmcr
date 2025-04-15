@@ -34,7 +34,7 @@ class BatchFIFOQueue():
 
 
 class MMCR_Loss(nn.Module):
-    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False):
+    def __init__(self, lmbda: float, n_aug: int, distributed: bool = False, memory_bank=None, l2_spectral_norm=False, spectral_target=False, spectral_topk=False, std_hinge_cutoff:float = 0.0, fix_log_var: float = -1):
         super(MMCR_Loss, self).__init__()
         self.lmbda = lmbda
         self.n_aug = n_aug
@@ -43,12 +43,25 @@ class MMCR_Loss(nn.Module):
         self.l2_spectral_norm = l2_spectral_norm
         self.spectral_target = spectral_target
         self.spectral_topk = spectral_topk
-
+        self.std_hinge_cutoff = std_hinge_cutoff
         self.memory_bank = memory_bank
+        self.fix_log_var = fix_log_var
 
     def forward(self, z: Tensor) -> Tuple[Tensor, dict]:
         # print(f"{z.max()} {z.min()}")
+
+        # Treat z as stacked mean and log variance (for stability)
+        assert z.shape[-1] % 2 == 0
+        splt = int(z.shape[-1] / 2)
+        mu, log_var = z[..., :splt], z[..., splt:]
+        if self.fix_log_var >= 0:
+            log_var = log_var * 0.0 + self.fix_log_var
+
+        # Sample from distribution using reparameterization trick
+        std = torch.exp(0.5 * log_var)
+        z = mu + (torch.randn_like(mu) * std)
         
+        # Project samples onto unit sphere + proceed with MMCR loss
         z = F.normalize(z, dim=-1)
         z_local_ = einops.rearrange(z, "(B N) C -> B C N", N=self.n_aug)
 
@@ -99,11 +112,18 @@ class MMCR_Loss(nn.Module):
         batch_size = z_local.shape[0]
         loss = self.lmbda * local_nuc / batch_size - global_nuc
 
+        # var_reg = (-torch.nn.functional.sigmoid(std)).mean()
+#        var_reg = torch.nn.functional.relu(self.std_hinge_cutoff - std).mean()
+        # loss += var_reg
+        var_reg = 0
         loss_dict = {
             "loss": loss.item(),
             "local_nuc": local_nuc.item(),
             "global_nuc": global_nuc.item(),
             "global_sing_vals" : global_sing_vals.detach().cpu().numpy(), 
+            "mu" : mu.detach().cpu().numpy(),
+            "log_var" : log_var.detach().cpu().numpy(),
+            "var_reg" : var_reg #.item(),
         }
 
         self.first_time = False
